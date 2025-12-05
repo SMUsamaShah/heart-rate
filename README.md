@@ -7,3 +7,6 @@ This records the whole graph.
 Will add a button to export the data as well. But its fine for now.
 
 (Vibe coded with Gemini 3 Pro, 2nd or 3rd attempt, many prompts)
+
+![Monitoring live heart rate](Screenshot1.png)
+![Checking a recorded heart rate](Screenshot1.png)
