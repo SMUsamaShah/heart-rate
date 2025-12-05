@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Smart Heart Rate Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden; 
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .scroller::-webkit-scrollbar { width: 6px; }
+        .scroller::-webkit-scrollbar-track { background: rgba(30, 41, 59, 0.5); }
+        .scroller::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+        
+        .monitor-grid {
+            background-image: 
+                linear-gradient(rgba(255, 65, 65, 0.1) 1px, transparent 1px);
+            background-size: 100% 20px;
+        }
+        .control-panel {
+            backdrop-filter: blur(10px);
+            background-color: rgba(30, 41, 59, 0.95);
+        }
+        input[type=range].scrubber {
+            -webkit-appearance: none;
+            background: transparent;
+        }
+        input[type=range].scrubber::-webkit-slider-runnable-track {
+            height: 6px;
+            background: #334155;
+            border-radius: 3px;
+        }
+        input[type=range].scrubber::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #38bdf8;
+            margin-top: -5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col">
+
+    <!-- Header / Stats -->
+    <div class="flex-none p-4 flex justify-between items-center bg-slate-900 border-b border-slate-700 z-10 shadow-lg">
+        <div class="flex flex-col">
+            <span class="text-xs text-slate-400 uppercase tracking-wider">Measured BPM</span>
+            <div class="flex items-baseline gap-2">
+                <span id="bpmDisplay" class="text-4xl font-mono font-bold text-slate-500">--</span>
+                <span id="modeBadge" class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">IDLE</span>
+            </div>
+        </div>
+        
+        <div class="text-right flex flex-col items-end">
+             <span class="text-xs text-slate-400 uppercase tracking-wider">Pulse</span>
+             <div id="beatIndicator" class="w-4 h-4 rounded-full bg-slate-700 mt-2 transition-colors duration-75 inline-block"></div>
+        </div>
+    </div>
+
+    <!-- Main Chart Area -->
+    <div class="flex-grow relative monitor-grid bg-black overflow-hidden group" id="canvasContainer">
+        <canvas id="ppgCanvas"></canvas>
+        
+        <!-- Video Element (Hidden, used for processing) -->
+        <video id="videoElement" playsinline style="display:none;"></video>
+        
+        <!-- Instructions Overlay -->
+        <div id="instructionOverlay" class="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/50 z-10 transition-opacity duration-300">
+            <div class="text-center p-6 max-w-sm">
+                <div class="text-slate-200 font-bold text-lg mb-2">Instructions</div>
+                <p class="text-slate-300 text-sm">1. Select <span class="text-sky-400 font-bold">Camera</span> or <span class="text-purple-400 font-bold">Simulate</span> below.</p>
+                <p class="text-slate-300 text-sm mt-2">2. For Camera: Cover the lens & flash lightly.</p>
+            </div>
+        </div>
+
+        <!-- Debug Info -->
+        <div class="absolute top-2 right-2 text-xs font-mono text-slate-500 pointer-events-none hidden sm:block">
+            <div>Gain: <span id="debugGain">1.0</span>x</div>
+            <div>Raw AC: <span id="debugRaw">0.00</span></div>
+        </div>
+
+        <!-- Review Controls -->
+        <div id="reviewControls" class="absolute bottom-4 left-4 right-4 bg-slate-800/90 p-3 rounded-lg border border-slate-600 hidden flex-col gap-2 z-20">
+            <div class="flex justify-between text-xs text-slate-300 mb-1">
+                <span>History Scroll</span>
+                <span id="reviewTimeDisplay">Live</span>
+            </div>
+            <input type="range" id="historySlider" min="0" max="100" value="100" class="w-full scrubber accent-sky-500">
+            <button id="backToLiveBtn" class="mt-2 w-full py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded text-sm transition-colors">
+                Back to Live Monitor
+            </button>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="flex-none flex flex-col h-1/3 min-h-[220px] control-panel border-t border-slate-700 z-20">
+        
+        <!-- Top Tab: Controls -->
+        <div class="p-4 border-b border-slate-700 grid grid-cols-3 gap-3">
+            <!-- Camera Toggle -->
+            <button id="cameraToggleBtn" class="h-12 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded shadow-lg flex flex-col items-center justify-center text-xs sm:text-sm transition-all">
+                <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                Camera
+            </button>
+
+            <!-- Simulate Toggle -->
+            <button id="simulateBtn" class="h-12 bg-purple-700 hover:bg-purple-600 text-white font-bold rounded shadow-lg flex flex-col items-center justify-center text-xs sm:text-sm transition-all">
+                <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
+                Simulate
+            </button>
+
+            <!-- Save Action -->
+            <button id="saveBtn" class="h-12 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded border border-slate-500 flex flex-col items-center justify-center text-xs sm:text-sm transition-all active:scale-95 disabled:opacity-50" disabled>
+                <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                Save
+            </button>
+        </div>
+
+        <!-- Saved Records List -->
+        <div class="flex-grow overflow-hidden flex flex-col bg-slate-900/50">
+            <div class="px-4 py-2 bg-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider flex justify-between">
+                <span>History</span>
+                <span id="storageInfo" class="font-mono font-normal opacity-50">0 MB</span>
+            </div>
+            <div id="savedListContainer" class="flex-grow overflow-y-auto scroller p-2 space-y-1">
+                <div class="text-center text-slate-600 text-sm py-4 italic" id="emptyState">No saved records</div>
+            </div>
+        </div>
+    </div>
+
+<script>
+/**
+ * APP STATE
+ */
+const CONFIG = {
+    maxHistorySeconds: 180, 
+    sampleRate: 60,
+};
+
+const state = {
+    mode: 'idle', // 'idle' | 'camera' | 'simulate' | 'review'
+    
+    // Time tracking
+    lastTime: 0,
+    totalTime: 0,
+    
+    // Data Storage
+    // Updated History Item: { val, threshold, beat, grid, label, bpm }
+    history: [], 
+    
+    // Review logic
+    reviewOffset: 0,
+    
+    // Grid helpers
+    timeSinceLastMinorGrid: 0,
+
+    // Signal Processing (Auto-Gain)
+    signalMean: 0,
+    framesSinceStart: 0,
+    recentValues: [], 
+    currentGain: 1.0,
+    
+    // Simulation Props
+    simPhase: 0,
+    simBpm: 75
+};
+
+// Algorithm State
+const algoState = {
+    lastBeatTime: 0,
+    refractoryPeriod: 250, 
+    runningMax: 0.1, 
+    threshold: 0.05,
+    decayRate: 0.99,       
+    detectedBeats: [],     
+    bpm: 0
+};
+
+/**
+ * CAMERA & PROCESSING VARIABLES
+ */
+const video = document.getElementById('videoElement');
+const offscreenCanvas = document.createElement('canvas');
+const offCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+let stream = null;
+let animationFrameId = null; // To track and cancel the loop
+
+// Processing Buffer
+offscreenCanvas.width = 30;
+offscreenCanvas.height = 30;
+
+/**
+ * DOM ELEMENTS
+ */
+const canvas = document.getElementById('ppgCanvas');
+const ctx = canvas.getContext('2d');
+const container = document.getElementById('canvasContainer');
+const measuredBpmDisplay = document.getElementById('bpmDisplay');
+const beatIndicator = document.getElementById('beatIndicator');
+const modeBadge = document.getElementById('modeBadge');
+const instructionOverlay = document.getElementById('instructionOverlay');
+const cameraToggleBtn = document.getElementById('cameraToggleBtn');
+const simulateBtn = document.getElementById('simulateBtn');
+
+// Debug
+const debugGain = document.getElementById('debugGain');
+const debugRaw = document.getElementById('debugRaw');
+
+// UI
+const saveBtn = document.getElementById('saveBtn');
+const savedListContainer = document.getElementById('savedListContainer');
+const reviewControls = document.getElementById('reviewControls');
+const historySlider = document.getElementById('historySlider');
+const backToLiveBtn = document.getElementById('backToLiveBtn');
+const reviewTimeDisplay = document.getElementById('reviewTimeDisplay');
+const emptyState = document.getElementById('emptyState');
+const storageInfo = document.getElementById('storageInfo');
+
+/**
+ * RESIZE HANDLER
+ */
+function resize() {
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+/**
+ * MODE SWITCHING
+ */
+async function setMode(newMode) {
+    if (state.mode === 'camera' && newMode !== 'camera') {
+        stopCamera();
+    }
+    
+    state.mode = newMode;
+    state.history = [];
+    state.totalTime = 0;
+    state.framesSinceStart = 0;
+    state.signalMean = 0;
+    state.recentValues = [];
+    state.currentGain = 1.0;
+    algoState.bpm = 0;
+    algoState.detectedBeats = [];
+    algoState.lastBeatTime = 0;
+
+    // UI Reset
+    instructionOverlay.classList.add('hidden');
+    saveBtn.disabled = true;
+    reviewControls.classList.add('hidden');
+    reviewControls.classList.remove('flex');
+    measuredBpmDisplay.classList.remove('text-green-500', 'text-purple-500', 'text-amber-500');
+    measuredBpmDisplay.classList.add('text-slate-500');
+    measuredBpmDisplay.innerText = "--";
+
+    if (newMode === 'idle') {
+        instructionOverlay.classList.remove('hidden');
+        modeBadge.innerText = "IDLE";
+        modeBadge.className = "text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-bold";
+        cameraToggleBtn.classList.remove('bg-rose-600');
+        cameraToggleBtn.classList.add('bg-sky-700');
+        simulateBtn.classList.remove('bg-rose-600');
+        simulateBtn.classList.add('bg-purple-700');
+    } else if (newMode === 'camera') {
+        modeBadge.innerText = "CAMERA";
+        modeBadge.className = "text-xs px-2 py-0.5 rounded bg-sky-900 text-sky-300 font-bold";
+        cameraToggleBtn.classList.add('bg-rose-600'); 
+        cameraToggleBtn.classList.remove('bg-sky-700');
+        simulateBtn.classList.add('bg-purple-700');
+        saveBtn.disabled = false;
+        await startCamera();
+    } else if (newMode === 'simulate') {
+        modeBadge.innerText = "SIMULATION";
+        modeBadge.className = "text-xs px-2 py-0.5 rounded bg-purple-900 text-purple-300 font-bold";
+        simulateBtn.classList.add('bg-rose-600'); 
+        simulateBtn.classList.remove('bg-purple-700');
+        cameraToggleBtn.classList.add('bg-sky-700');
+        saveBtn.disabled = false;
+    } else if (newMode === 'review') {
+        modeBadge.innerText = "REVIEW";
+        modeBadge.className = "text-xs px-2 py-0.5 rounded bg-amber-900 text-amber-300 font-bold inline-block";
+        reviewControls.classList.remove('hidden');
+        reviewControls.classList.add('flex');
+    }
+}
+
+/**
+ * CAMERA HANDLING - MEMORY SAFE
+ */
+async function startCamera() {
+    try {
+        const constraints = {
+            audio: false,
+            video: {
+                facingMode: 'environment',
+                width: { ideal: 320 }, 
+                height: { ideal: 240 },
+                frameRate: { ideal: 30 }
+            }
+        };
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        
+        await new Promise((resolve) => {
+            video.onloadedmetadata = () => {
+                video.play();
+                resolve();
+            };
+        });
+
+        const track = stream.getVideoTracks()[0];
+        try {
+            const capabilities = track.getCapabilities();
+            if (capabilities.torch) {
+                await track.applyConstraints({ advanced: [{ torch: true }] });
+            }
+        } catch (err) { console.warn("Torch fail", err); }
+        
+    } catch (err) {
+        console.error("Camera Error:", err);
+        alert("Camera access denied or unavailable.");
+        setMode('idle');
+    }
+}
+
+function stopCamera() {
+    if (stream) {
+        stream.getTracks().forEach(track => {
+            track.stop();
+        });
+        stream = null;
+    }
+    if (video) {
+        video.pause();
+        video.srcObject = null;
+    }
+}
+
+/**
+ * SIGNAL PROCESSING CORE
+ */
+function normalizeSignal(rawValue) {
+    state.recentValues.push(rawValue);
+    if (state.recentValues.length > 120) state.recentValues.shift();
+
+    let min = -0.01; 
+    let max = 0.01; 
+
+    for (let v of state.recentValues) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+    }
+
+    const range = max - min;
+    const targetGain = 0.8 / (range || 0.1); 
+    state.currentGain = (state.currentGain * 0.95) + (targetGain * 0.05);
+
+    let normalized = rawValue * state.currentGain;
+    normalized = Math.max(-0.6, Math.min(0.6, normalized));
+
+    debugGain.innerText = state.currentGain.toFixed(1);
+    debugRaw.innerText = rawValue.toFixed(4);
+
+    return normalized;
+}
+
+function processFrame(dt) {
+    if (!video || video.paused || video.ended) return 0;
+
+    offCtx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+    const frame = offCtx.getImageData(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+    const data = frame.data;
+    
+    let sumGreen = 0;
+    for (let i = 0; i < data.length; i += 4) {
+        sumGreen += data[i + 1]; 
+    }
+    const avgGreen = sumGreen / (data.length / 4);
+    
+    if (state.framesSinceStart < 30) {
+        state.signalMean = avgGreen;
+        state.framesSinceStart++;
+        return 0;
+    }
+    
+    state.signalMean = (state.signalMean * 0.95) + (avgGreen * 0.05);
+    let rawAC = state.signalMean - avgGreen;
+    
+    return normalizeSignal(rawAC);
+}
+
+function generateSimulation(dt) {
+    const beatDuration = 60 / state.simBpm;
+    state.simPhase += dt;
+    if (state.simPhase > beatDuration) state.simPhase -= beatDuration;
+    const t = state.simPhase / beatDuration;
+    
+    const gaussian = (a, c, w) => a * Math.exp(-Math.pow(t - c, 2) / (2 * w * w));
+
+    let signal = 0;
+    signal += gaussian(1.0, 0.2, 0.08); 
+    signal += gaussian(0.3, 0.5, 0.12);
+    signal += Math.sin(state.totalTime) * 0.1;
+    
+    let rawSimulated = signal * 0.05; 
+    return normalizeSignal(rawSimulated);
+}
+
+function processAlgorithm(val, timeNow) {
+    algoState.runningMax *= algoState.decayRate;
+    algoState.threshold = Math.max(algoState.runningMax * 0.5, 0.05); 
+
+    if (val > algoState.runningMax) algoState.runningMax = val;
+
+    let isBeat = false;
+    if (val > algoState.threshold && (timeNow - algoState.lastBeatTime) > algoState.refractoryPeriod) {
+        if (algoState.runningMax > 0.15) {
+            algoState.lastBeatTime = timeNow;
+            isBeat = true;
+            onBeatDetected(timeNow);
+        }
+    }
+    return { isBeat, threshold: algoState.threshold };
+}
+
+function onBeatDetected(timeNow) {
+    beatIndicator.classList.remove('bg-slate-700');
+    beatIndicator.classList.add('bg-red-500', 'scale-125');
+    setTimeout(() => beatIndicator.classList.remove('bg-red-500', 'scale-125'), 150);
+    setTimeout(() => beatIndicator.classList.add('bg-slate-700'), 150);
+
+    algoState.detectedBeats.push(timeNow);
+    if (algoState.detectedBeats.length > 8) algoState.detectedBeats.shift();
+
+    if (algoState.detectedBeats.length >= 2) {
+        let sum = 0;
+        for(let i = 1; i < algoState.detectedBeats.length; i++) {
+            sum += (algoState.detectedBeats[i] - algoState.detectedBeats[i-1]);
+        }
+        let avg = sum / (algoState.detectedBeats.length - 1);
+        let instantBpm = 60000 / avg;
+        
+        if (algoState.bpm === 0) algoState.bpm = instantBpm;
+        else algoState.bpm = (algoState.bpm * 0.7) + (instantBpm * 0.3);
+        
+        measuredBpmDisplay.innerText = Math.round(algoState.bpm);
+        measuredBpmDisplay.classList.remove('text-slate-500');
+        if (state.mode === 'camera') measuredBpmDisplay.classList.add('text-green-500');
+        if (state.mode === 'simulate') measuredBpmDisplay.classList.add('text-purple-500');
+
+        algoState.refractoryPeriod = Math.max(250, Math.min(avg * 0.6, 1000));
+    }
+}
+
+/**
+ * HISTORY & BUFFER
+ */
+function updateHistory(val, threshold, isBeat, currentBpm, dt) {
+    state.timeSinceLastMinorGrid += dt;
+    
+    let gridType = null;
+    let gridLabel = null;
+
+    if (state.timeSinceLastMinorGrid >= 0.2) {
+        const steps = Math.floor(state.timeSinceLastMinorGrid / 0.2);
+        state.timeSinceLastMinorGrid -= (steps * 0.2);
+        
+        const currentSecond = Math.floor(state.totalTime);
+        const prevSecond = Math.floor(state.totalTime - (steps * 0.2));
+        const isMajor = (currentSecond > prevSecond) || (Math.abs(state.totalTime % 1.0) < 0.05);
+
+        gridType = isMajor ? 'major' : 'minor';
+        if (isMajor) gridLabel = Math.floor(state.totalTime) + 's';
+    }
+
+    state.history.push({ 
+        val, 
+        threshold, 
+        beat: isBeat, 
+        grid: gridType, 
+        label: gridLabel,
+        bpm: currentBpm || 0 
+    });
+
+    const maxSize = CONFIG.maxHistorySeconds * 60; 
+    if (state.history.length > maxSize) state.history.shift();
+}
+
+/**
+ * SAVING & LOADING
+ */
+function saveRecording() {
+    if (state.history.length < 60) {
+        alert("Record too short.");
+        return;
+    }
+    try {
+        const record = {
+            id: Date.now(),
+            timestamp: new Date().toISOString(),
+            bpm: Math.round(algoState.bpm) || '--',
+            data: state.history
+        };
+        const existing = JSON.parse(localStorage.getItem('hr_records') || '[]');
+        existing.push(record);
+        if(existing.length > 10) existing.shift();
+        localStorage.setItem('hr_records', JSON.stringify(existing));
+        renderSavedList();
+        
+        const originalText = saveBtn.innerHTML;
+        saveBtn.innerText = "Saved!";
+        saveBtn.classList.add('bg-green-600');
+        setTimeout(() => {
+            saveBtn.innerHTML = originalText;
+            saveBtn.classList.remove('bg-green-600');
+        }, 1500);
+    } catch (e) { alert("Storage full"); }
+}
+
+function loadRecording(id) {
+    const existing = JSON.parse(localStorage.getItem('hr_records') || '[]');
+    const record = existing.find(r => r.id === id);
+    if (!record) return;
+
+    setMode('review');
+    state.history = record.data;
+    
+    updateSliderRange();
+    historySlider.value = historySlider.max;
+    handleSliderInput();
+}
+
+function renderSavedList() {
+    const existing = JSON.parse(localStorage.getItem('hr_records') || '[]');
+    const bytes = new Blob([JSON.stringify(existing)]).size;
+    storageInfo.innerText = `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+    savedListContainer.innerHTML = '';
+    
+    if (existing.length === 0) {
+        savedListContainer.appendChild(emptyState);
+        return;
+    }
+
+    existing.sort((a, b) => b.id - a.id).forEach(rec => {
+        const date = new Date(rec.timestamp);
+        const el = document.createElement('div');
+        el.className = 'bg-slate-800 p-3 rounded border border-slate-700 hover:border-sky-500 cursor-pointer flex justify-between items-center group';
+        el.innerHTML = `
+            <div>
+                <div class="font-bold text-sky-400 text-sm">${date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+                <div class="text-[10px] text-slate-500">${date.toLocaleDateString()}</div>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="text-right">
+                    <div class="text-xs text-slate-400">Avg BPM</div>
+                    <div class="font-bold text-slate-200">${rec.bpm}</div>
+                </div>
+                <button class="delete-btn p-2 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100" data-id="${rec.id}">
+                   X
+                </button>
+            </div>
+        `;
+        el.onclick = (e) => { if(!e.target.closest('.delete-btn')) loadRecording(rec.id); };
+        el.querySelector('.delete-btn').onclick = (e) => {
+            e.stopPropagation();
+            const newStore = existing.filter(r => r.id !== rec.id);
+            localStorage.setItem('hr_records', JSON.stringify(newStore));
+            renderSavedList();
+        };
+        savedListContainer.appendChild(el);
+    });
+}
+
+/**
+ * MAIN LOOP
+ */
+function loop(timestamp) {
+    if (!state.lastTime) state.lastTime = timestamp;
+    const dt = (timestamp - state.lastTime) / 1000;
+    state.lastTime = timestamp;
+
+    if (state.mode === 'camera' || state.mode === 'simulate') {
+        state.totalTime += dt;
+        let signal = 0;
+
+        if (state.mode === 'camera') {
+            signal = processFrame(dt);
+        } else {
+            signal = generateSimulation(dt);
+        }
+
+        const algoResult = processAlgorithm(signal, timestamp);
+        const currentBpm = Math.round(algoState.bpm);
+        updateHistory(signal, algoResult.threshold, algoResult.isBeat, currentBpm, dt);
+    }
+    
+    draw();
+    animationFrameId = requestAnimationFrame(loop);
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    let startIndex, endIndex;
+    if (state.mode === 'review') {
+        endIndex = state.reviewOffset; 
+        startIndex = Math.max(0, endIndex - canvas.width);
+        
+        if (state.history.length > 0) {
+            const dataPoint = state.history[Math.min(endIndex, state.history.length - 1)];
+            if (dataPoint) {
+                const histBpm = dataPoint.bpm;
+                measuredBpmDisplay.innerText = histBpm > 0 ? histBpm : '--';
+                measuredBpmDisplay.classList.remove('text-slate-500', 'text-green-500', 'text-purple-500');
+                measuredBpmDisplay.classList.add('text-amber-500');
+            }
+        }
+
+    } else {
+        endIndex = state.history.length;
+        startIndex = Math.max(0, endIndex - canvas.width);
+    }
+
+    const viewData = state.history.slice(startIndex, endIndex);
+    if (viewData.length === 0) return;
+
+    const centerY = canvas.height / 2;
+    const scaleY = canvas.height / 2.2; 
+    const mapY = (val) => centerY - (val * scaleY);
+
+    // Grid
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.font = "10px monospace";
+    for (let i = 0; i < viewData.length; i++) {
+        if (viewData[i].grid) {
+            const x = i;
+            ctx.beginPath();
+            ctx.strokeStyle = viewData[i].grid === 'major' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)';
+            ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            if (viewData[i].label) {
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.fillText(viewData[i].label, x, canvas.height - 5);
+            }
+        }
+    }
+
+    // Threshold (Yellow)
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(255, 200, 0, 0.4)';
+    ctx.setLineDash([5, 5]);
+    for (let i = 0; i < viewData.length; i++) {
+        const y = mapY(viewData[i].threshold);
+        if (i===0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Signal
+    const color = state.mode === 'simulate' ? '#a855f7' : (state.mode === 'review' ? '#f59e0b' : '#ff3366');
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < viewData.length; i++) {
+        const y = mapY(viewData[i].val);
+        if (i===0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+    }
+    ctx.stroke();
+
+    // Fill
+    ctx.lineTo(viewData.length - 1, canvas.height);
+    ctx.lineTo(0, canvas.height);
+    ctx.closePath();
+    ctx.fillStyle = color + '20'; 
+    ctx.fill();
+
+    // Beats
+    ctx.fillStyle = '#fff';
+    for (let i = 0; i < viewData.length; i++) {
+        if (viewData[i].beat) {
+            ctx.beginPath();
+            ctx.arc(i, mapY(viewData[i].val), 4, 0, Math.PI*2);
+            ctx.fill();
+        }
+    }
+}
+
+// Sliders and Buttons
+function updateSliderRange() {
+    historySlider.min = Math.min(state.history.length, canvas.width);
+    historySlider.max = state.history.length;
+}
+function handleSliderInput() {
+    state.reviewOffset = parseInt(historySlider.value);
+    const timeOffset = (state.history.length - state.reviewOffset) / 60;
+    reviewTimeDisplay.innerText = `-${timeOffset.toFixed(1)}s`;
+}
+historySlider.addEventListener('input', handleSliderInput);
+cameraToggleBtn.addEventListener('click', () => {
+    if (state.mode === 'camera') setMode('idle');
+    else setMode('camera');
+});
+simulateBtn.addEventListener('click', () => {
+    if (state.mode === 'simulate') setMode('idle');
+    else setMode('simulate');
+});
+saveBtn.addEventListener('click', saveRecording);
+backToLiveBtn.addEventListener('click', () => setMode('idle'));
+
+/**
+ * LIFECYCLE MANAGEMENT (Cleanup)
+ */
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        // Stop Loop
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+        // Stop Camera immediately to free hardware
+        if (state.mode === 'camera') {
+            stopCamera();
+            setMode('idle');
+        }
+    } else {
+        // Restart Loop if visible
+        state.lastTime = performance.now();
+        loop(performance.now());
+    }
+});
+
+window.addEventListener('pagehide', stopCamera);
+window.addEventListener('beforeunload', stopCamera);
+
+// Start
+renderSavedList();
+loop(performance.now());
+
+</script>
+</body>
+</html>
