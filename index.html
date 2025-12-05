@@ -98,41 +98,59 @@
                 <span id="reviewTimeDisplay">Live</span>
             </div>
             <input type="range" id="historySlider" min="0" max="100" value="100" class="w-full scrubber accent-sky-500">
-            <button id="backToLiveBtn" class="mt-2 w-full py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded text-sm transition-colors">
-                Back to Live Monitor
-            </button>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+                <button id="exportImgBtn" class="py-2 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded text-sm transition-colors border border-slate-500">
+                    Export Graph Image
+                </button>
+                <button id="backToLiveBtn" class="py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded text-sm transition-colors">
+                    Back to Live
+                </button>
+            </div>
         </div>
     </div>
 
     <!-- Controls -->
     <div class="flex-none flex flex-col h-1/3 min-h-[220px] control-panel border-t border-slate-700 z-20">
         
-        <!-- Top Tab: Controls -->
-        <div class="p-4 border-b border-slate-700 grid grid-cols-3 gap-3">
-            <!-- Camera Toggle -->
-            <button id="cameraToggleBtn" class="h-12 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded shadow-lg flex flex-col items-center justify-center text-xs sm:text-sm transition-all">
-                <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                Camera
-            </button>
+        <div class="p-4 border-b border-slate-700 flex flex-col gap-3">
+            <!-- Main Buttons -->
+            <div class="grid grid-cols-3 gap-3">
+                <button id="cameraToggleBtn" class="h-12 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded shadow-lg flex flex-col items-center justify-center text-xs sm:text-sm transition-all">
+                    <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    Camera
+                </button>
 
-            <!-- Simulate Toggle -->
-            <button id="simulateBtn" class="h-12 bg-purple-700 hover:bg-purple-600 text-white font-bold rounded shadow-lg flex flex-col items-center justify-center text-xs sm:text-sm transition-all">
-                <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
-                Simulate
-            </button>
+                <button id="simulateBtn" class="h-12 bg-purple-700 hover:bg-purple-600 text-white font-bold rounded shadow-lg flex flex-col items-center justify-center text-xs sm:text-sm transition-all">
+                    <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
+                    Simulate
+                </button>
 
-            <!-- Save Action -->
-            <button id="saveBtn" class="h-12 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded border border-slate-500 flex flex-col items-center justify-center text-xs sm:text-sm transition-all active:scale-95 disabled:opacity-50" disabled>
-                <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
-                Save
-            </button>
+                <button id="saveBtn" class="h-12 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded border border-slate-500 flex flex-col items-center justify-center text-xs sm:text-sm transition-all active:scale-95 disabled:opacity-50" disabled>
+                    <svg class="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                    Save
+                </button>
+            </div>
+
+            <!-- Simulation Slider (Hidden by default) -->
+            <div id="simControls" class="hidden bg-slate-800 p-3 rounded border border-slate-600 animate-fade-in">
+                <div class="flex justify-between items-center mb-1">
+                    <label class="text-xs font-bold text-purple-400 uppercase">Simulated Heart Rate</label>
+                    <span id="targetBpmValue" class="text-xs font-mono bg-purple-900 text-purple-200 px-2 rounded">75 BPM</span>
+                </div>
+                <input type="range" id="bpmSlider" min="40" max="220" value="75" class="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-purple-500">
+            </div>
         </div>
 
         <!-- Saved Records List -->
         <div class="flex-grow overflow-hidden flex flex-col bg-slate-900/50">
-            <div class="px-4 py-2 bg-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider flex justify-between">
+            <div class="px-4 py-2 bg-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider flex justify-between items-center">
                 <span>History</span>
-                <span id="storageInfo" class="font-mono font-normal opacity-50">0 MB</span>
+                <div class="flex items-center gap-3">
+                    <span id="storageInfo" class="font-mono font-normal opacity-50">0 MB</span>
+                    <button id="exportJsonBtn" class="text-sky-400 hover:text-sky-300" title="Download all data as JSON">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    </button>
+                </div>
             </div>
             <div id="savedListContainer" class="flex-grow overflow-y-auto scroller p-2 space-y-1">
                 <div class="text-center text-slate-600 text-sm py-4 italic" id="emptyState">No saved records</div>
@@ -195,7 +213,7 @@ const video = document.getElementById('videoElement');
 const offscreenCanvas = document.createElement('canvas');
 const offCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
 let stream = null;
-let animationFrameId = null; // To track and cancel the loop
+let animationFrameId = null; 
 
 // Processing Buffer
 offscreenCanvas.width = 30;
@@ -214,6 +232,11 @@ const instructionOverlay = document.getElementById('instructionOverlay');
 const cameraToggleBtn = document.getElementById('cameraToggleBtn');
 const simulateBtn = document.getElementById('simulateBtn');
 
+// Controls
+const simControls = document.getElementById('simControls');
+const bpmSlider = document.getElementById('bpmSlider');
+const targetBpmDisplay = document.getElementById('targetBpmValue');
+
 // Debug
 const debugGain = document.getElementById('debugGain');
 const debugRaw = document.getElementById('debugRaw');
@@ -227,6 +250,8 @@ const backToLiveBtn = document.getElementById('backToLiveBtn');
 const reviewTimeDisplay = document.getElementById('reviewTimeDisplay');
 const emptyState = document.getElementById('emptyState');
 const storageInfo = document.getElementById('storageInfo');
+const exportJsonBtn = document.getElementById('exportJsonBtn');
+const exportImgBtn = document.getElementById('exportImgBtn');
 
 /**
  * RESIZE HANDLER
@@ -262,6 +287,7 @@ async function setMode(newMode) {
     saveBtn.disabled = true;
     reviewControls.classList.add('hidden');
     reviewControls.classList.remove('flex');
+    simControls.classList.add('hidden'); // Hide sim controls by default
     measuredBpmDisplay.classList.remove('text-green-500', 'text-purple-500', 'text-amber-500');
     measuredBpmDisplay.classList.add('text-slate-500');
     measuredBpmDisplay.innerText = "--";
@@ -288,6 +314,7 @@ async function setMode(newMode) {
         simulateBtn.classList.add('bg-rose-600'); 
         simulateBtn.classList.remove('bg-purple-700');
         cameraToggleBtn.classList.add('bg-sky-700');
+        simControls.classList.remove('hidden'); // Show sim controls
         saveBtn.disabled = false;
     } else if (newMode === 'review') {
         modeBadge.innerText = "REVIEW";
@@ -298,7 +325,55 @@ async function setMode(newMode) {
 }
 
 /**
- * CAMERA HANDLING - MEMORY SAFE
+ * EXPORT LOGIC
+ */
+function exportAllData() {
+    const raw = localStorage.getItem('hr_records');
+    if (!raw) return alert("No data to export");
+    
+    const blob = new Blob([raw], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `heart_rate_data_${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function exportGraphImage() {
+    // 1. Force a redraw to ensure clean state
+    draw(); 
+    
+    // 2. Draw Overlay Text
+    ctx.save();
+    ctx.fillStyle = "rgba(15, 23, 42, 0.8)"; // Semi-transparent bg for text
+    ctx.fillRect(canvas.width - 200, 10, 190, 60);
+    
+    ctx.fillStyle = '#f59e0b'; // Amber
+    ctx.font = 'bold 32px monospace';
+    ctx.textAlign = 'right';
+    const currentBpm = measuredBpmDisplay.innerText;
+    ctx.fillText(`${currentBpm} BPM`, canvas.width - 20, 45);
+    
+    ctx.fillStyle = '#94a3b8'; // Slate 400
+    ctx.font = '12px sans-serif';
+    ctx.fillText(new Date().toLocaleString(), canvas.width - 20, 62);
+    ctx.restore();
+
+    // 3. Export
+    const link = document.createElement('a');
+    link.download = `ecg_graph_${Date.now()}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    
+    // 4. Redraw again to clear the overlay text from the interactive view
+    requestAnimationFrame(draw); 
+}
+
+/**
+ * CAMERA HANDLING
  */
 async function startCamera() {
     try {
@@ -613,7 +688,9 @@ function loop(timestamp) {
 }
 
 function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Fill with black first to ensure exported images have a background
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     
     let startIndex, endIndex;
     if (state.mode === 'review') {
@@ -710,6 +787,13 @@ function handleSliderInput() {
     reviewTimeDisplay.innerText = `-${timeOffset.toFixed(1)}s`;
 }
 historySlider.addEventListener('input', handleSliderInput);
+
+// Simulation Slider
+bpmSlider.addEventListener('input', (e) => {
+    state.simBpm = parseInt(e.target.value);
+    targetBpmDisplay.innerText = state.simBpm + " BPM";
+});
+
 cameraToggleBtn.addEventListener('click', () => {
     if (state.mode === 'camera') setMode('idle');
     else setMode('camera');
@@ -720,24 +804,23 @@ simulateBtn.addEventListener('click', () => {
 });
 saveBtn.addEventListener('click', saveRecording);
 backToLiveBtn.addEventListener('click', () => setMode('idle'));
+exportJsonBtn.addEventListener('click', exportAllData);
+exportImgBtn.addEventListener('click', exportGraphImage);
 
 /**
  * LIFECYCLE MANAGEMENT (Cleanup)
  */
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-        // Stop Loop
         if (animationFrameId) {
             cancelAnimationFrame(animationFrameId);
             animationFrameId = null;
         }
-        // Stop Camera immediately to free hardware
         if (state.mode === 'camera') {
             stopCamera();
             setMode('idle');
         }
     } else {
-        // Restart Loop if visible
         state.lastTime = performance.now();
         loop(performance.now());
     }
