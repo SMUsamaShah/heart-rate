@@ -3,17 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Pulse Monitor</title>
+    <title>Pulse Monitor v2</title>
     
-    <!-- PWA: Theme Color -->
     <meta name="theme-color" content="#0f172a">
-    
-    <!-- PWA: iOS Specifics -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Pulse">
 
-    <!-- PWA: Dynamic Manifest & Icons -->
     <link rel="icon" id="dynamic-favicon">
     <link rel="apple-touch-icon" id="dynamic-apple-icon">
     <link rel="manifest" id="dynamic-manifest">
@@ -29,18 +25,13 @@
             -webkit-user-select: none;
             user-select: none;
         }
-        canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-        }
+        canvas { display: block; width: 100%; height: 100%; }
         .scroller::-webkit-scrollbar { width: 4px; }
         .scroller::-webkit-scrollbar-track { background: rgba(30, 41, 59, 0.3); }
         .scroller::-webkit-scrollbar-thumb { background: #475569; border-radius: 2px; }
         
         .monitor-grid {
-            background-image: 
-                linear-gradient(rgba(255, 65, 65, 0.1) 1px, transparent 1px);
+            background-image: linear-gradient(rgba(255, 65, 65, 0.1) 1px, transparent 1px);
             background-size: 100% 20px;
         }
         .control-panel {
@@ -48,31 +39,30 @@
             background-color: rgba(15, 23, 42, 0.92);
             padding-bottom: env(safe-area-inset-bottom);
         }
-        
         input[type=range].scrubber {
-            -webkit-appearance: none;
-            background: transparent;
+            -webkit-appearance: none; background: transparent;
         }
         input[type=range].scrubber::-webkit-slider-runnable-track {
-            height: 6px;
-            background: #334155;
-            border-radius: 3px;
+            height: 6px; background: #334155; border-radius: 3px;
         }
         input[type=range].scrubber::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            height: 18px;
-            width: 18px;
-            border-radius: 50%;
-            background: #38bdf8;
-            margin-top: -6px;
-            cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            -webkit-appearance: none; height: 18px; width: 18px;
+            border-radius: 50%; background: #38bdf8; margin-top: -6px;
+            cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
+        /* Toggle Switch */
+        .toggle-checkbox:checked { right: 0; border-color: #38bdf8; }
+        .toggle-checkbox:checked + .toggle-label { background-color: #38bdf8; }
+        
+        /* Modal Animation */
+        .modal-enter { opacity: 0; transform: scale(0.95); }
+        .modal-enter-active { opacity: 1; transform: scale(1); transition: all 0.2s; }
+        .modal-exit { opacity: 0; transform: scale(0.95); transition: all 0.2s; }
     </style>
 </head>
 <body class="h-screen w-screen flex flex-col">
 
-    <!-- Header / Stats (Padded for Status Bar) -->
+    <!-- Header / Stats -->
     <div class="flex-none pt-safe-top px-4 pb-2 flex justify-between items-center bg-slate-900/80 border-b border-slate-700/50 z-10 backdrop-blur-md">
         <div class="flex flex-col pt-2">
             <span class="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Heart Rate</span>
@@ -82,11 +72,21 @@
             </div>
         </div>
         
-        <div class="text-right flex flex-col items-end pt-2">
-             <div id="beatIndicator" class="w-3 h-3 rounded-full bg-slate-800 transition-colors duration-75 inline-block"></div>
+        <div class="text-right flex flex-col items-end pt-2 gap-1">
+             <div class="flex items-center gap-2">
+                 <!-- Tiny Preview Canvas -->
+                 <canvas id="previewCanvas" width="30" height="30" class="w-8 h-8 rounded border border-slate-600 bg-black hidden pixelated"></canvas>
+                 
+                 <div id="beatIndicator" class="w-3 h-3 rounded-full bg-slate-800 transition-colors duration-75 inline-block"></div>
+                 
+                 <!-- Settings Button -->
+                 <button id="settingsBtn" class="p-1 text-slate-400 hover:text-white transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                 </button>
+             </div>
+             
              <div class="flex items-center gap-2 mt-1">
-                 <!-- Wake Lock Indicator -->
-                 <div id="wakeLockIndicator" class="hidden text-[9px] text-amber-500 font-bold flex items-center gap-1 opacity-80" title="Screen Stay-On Active">
+                 <div id="wakeLockIndicator" class="hidden text-[9px] text-amber-500 font-bold flex items-center gap-1 opacity-80">
                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
                     <span>AWAKE</span>
                  </div>
@@ -98,8 +98,6 @@
     <!-- Main Chart Area -->
     <div class="flex-grow relative monitor-grid bg-black overflow-hidden group" id="canvasContainer">
         <canvas id="ppgCanvas"></canvas>
-        
-        <!-- Video Element (Hidden) -->
         <video id="videoElement" playsinline style="display:none;"></video>
         
         <!-- Instructions Overlay -->
@@ -113,7 +111,6 @@
             </div>
         </div>
 
-        <!-- Debug Info -->
         <div class="absolute bottom-2 right-2 text-[9px] font-mono text-slate-600 pointer-events-none hidden sm:block">
             Gain: <span id="debugGain">1.0</span>x
         </div>
@@ -138,23 +135,19 @@
 
     <!-- Controls & List -->
     <div class="flex-none flex flex-col h-[35vh] min-h-[240px] control-panel border-t border-slate-700/50 z-20">
-        
-        <!-- Action Buttons Bar -->
+        <!-- Action Buttons -->
         <div class="p-3 border-b border-slate-700/50 flex flex-col gap-3">
             <div class="grid grid-cols-3 gap-2">
                 <button id="cameraToggleBtn" class="h-11 bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white font-bold rounded-lg shadow-lg shadow-sky-900/20 flex flex-col items-center justify-center text-xs transition-all">
                     Camera
                 </button>
-
                 <button id="simulateBtn" class="h-11 bg-purple-600 hover:bg-purple-500 active:bg-purple-700 text-white font-bold rounded-lg shadow-lg shadow-purple-900/20 flex flex-col items-center justify-center text-xs transition-all">
                     Simulate
                 </button>
-
                 <button id="saveBtn" class="h-11 bg-slate-700 hover:bg-slate-600 active:bg-slate-800 text-white font-bold rounded-lg border border-slate-600 flex flex-col items-center justify-center text-xs transition-all disabled:opacity-40" disabled>
                     Save
                 </button>
             </div>
-
             <!-- Sim Slider -->
             <div id="simControls" class="hidden bg-slate-800/80 p-2.5 rounded-lg border border-slate-700 animate-fade-in">
                 <div class="flex justify-between items-center mb-1">
@@ -176,6 +169,51 @@
         <!-- List -->
         <div id="savedListContainer" class="flex-grow overflow-y-auto scroller p-2 space-y-1.5 pb-safe-bottom">
             <div class="text-center text-slate-600 text-xs py-8 italic" id="emptyState">No saved records</div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div class="bg-slate-800 w-11/12 max-w-sm rounded-xl border border-slate-600 shadow-2xl p-5 transform transition-all duration-200 scale-95 opacity-0" id="settingsContent">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-slate-100 font-bold text-lg">Settings</h3>
+                <button id="closeSettingsBtn" class="text-slate-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Toggle Preview -->
+                <div class="flex items-center justify-between">
+                    <label class="text-sm text-slate-300">Camera Preview</label>
+                    <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" name="toggle" id="settingPreview" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                        <label for="settingPreview" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer"></label>
+                    </div>
+                </div>
+
+                <!-- Auto Stop -->
+                <div class="flex items-center justify-between">
+                    <label class="text-sm text-slate-300">
+                        Auto-Stop (seconds)
+                        <span class="block text-[10px] text-slate-500">0 = Manual stop</span>
+                    </label>
+                    <input type="number" id="settingAutoStop" min="0" max="300" class="w-16 bg-slate-900 border border-slate-600 rounded p-1 text-center text-sm text-white focus:border-sky-500 outline-none">
+                </div>
+
+                <!-- Auto Save -->
+                <div class="flex items-center justify-between">
+                    <label class="text-sm text-slate-300">Auto-Save on Stop</label>
+                    <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" name="toggle" id="settingAutoSave" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                        <label for="settingAutoSave" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer"></label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 text-center">
+                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.1</span>
+            </div>
         </div>
     </div>
 
@@ -202,8 +240,7 @@
 })();
 
 /**
- * SCREEN WAKE LOCK MANAGER
- * Prevents screen from sleeping during measurement
+ * WAKE LOCK
  */
 let wakeLock = null;
 const wakeLockIndicator = document.getElementById('wakeLockIndicator');
@@ -213,37 +250,32 @@ async function acquireWakeLock() {
         try {
             wakeLock = await navigator.wakeLock.request('screen');
             wakeLockIndicator.classList.remove('hidden');
-            console.log("Wake Lock active");
-            
-            // Re-acquire if lock is released by system but we are still active
             wakeLock.addEventListener('release', () => {
-                console.log('Wake Lock released by system');
                 wakeLockIndicator.classList.add('hidden');
-                // We don't auto re-acquire here to avoid loops, handled by visibility change
             });
-        } catch (err) {
-            console.warn(`Wake Lock failed: ${err.name}, ${err.message}`);
-        }
+        } catch (err) { console.warn('Wake Lock error', err); }
     }
 }
 
 async function releaseWakeLock() {
     if (wakeLock !== null) {
-        try {
-            await wakeLock.release();
-            wakeLock = null;
-        } catch(e) {}
+        try { await wakeLock.release(); wakeLock = null; } catch(e) {}
         wakeLockIndicator.classList.add('hidden');
-        console.log("Wake Lock released");
     }
 }
 
 /**
- * APP STATE
+ * APP SETTINGS & STATE
  */
 const CONFIG = {
     maxHistorySeconds: 180, 
     sampleRate: 60,
+};
+
+const appSettings = {
+    showPreview: false,
+    autoStopSeconds: 0,
+    autoSave: false
 };
 
 const state = {
@@ -261,13 +293,18 @@ const state = {
     simBpm: 75
 };
 
+const currentSession = {
+    id: null,
+    startTime: null
+};
+
 const algoState = {
     lastBeatTime: 0,
     refractoryPeriod: 250, 
     runningMax: 0.1, 
     threshold: 0.05,
-    decayRate: 0.99,       
-    detectedBeats: [],     
+    decayRate: 0.99,        
+    detectedBeats: [],      
     bpm: 0
 };
 
@@ -305,6 +342,46 @@ const storageInfo = document.getElementById('storageInfo');
 const exportJsonBtn = document.getElementById('exportJsonBtn');
 const exportImgBtn = document.getElementById('exportImgBtn');
 
+// New Elements
+const previewCanvas = document.getElementById('previewCanvas');
+const previewCtx = previewCanvas.getContext('2d');
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsModal = document.getElementById('settingsModal');
+const settingsContent = document.getElementById('settingsContent');
+const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+const settingPreview = document.getElementById('settingPreview');
+const settingAutoStop = document.getElementById('settingAutoStop');
+const settingAutoSave = document.getElementById('settingAutoSave');
+
+// --- Initialization ---
+function loadSettings() {
+    const saved = localStorage.getItem('pulse_settings');
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            Object.assign(appSettings, parsed);
+        } catch(e) {}
+    }
+    // Update UI
+    settingPreview.checked = appSettings.showPreview;
+    settingAutoStop.value = appSettings.autoStopSeconds;
+    settingAutoSave.checked = appSettings.autoSave;
+    togglePreviewVisibility();
+}
+
+function saveSettings() {
+    appSettings.showPreview = settingPreview.checked;
+    appSettings.autoStopSeconds = parseInt(settingAutoStop.value) || 0;
+    appSettings.autoSave = settingAutoSave.checked;
+    localStorage.setItem('pulse_settings', JSON.stringify(appSettings));
+    togglePreviewVisibility();
+}
+
+function togglePreviewVisibility() {
+    if (appSettings.showPreview) previewCanvas.classList.remove('hidden');
+    else previewCanvas.classList.add('hidden');
+}
+
 // Resize
 function resize() {
     canvas.width = container.clientWidth;
@@ -317,12 +394,19 @@ resize();
 async function setMode(newMode) {
     if (state.mode === 'camera' && newMode !== 'camera') {
         stopCamera();
-        releaseWakeLock(); // Release lock when leaving camera mode
+        releaseWakeLock();
     }
     
+    // Auto-save check when stopping a recording session
+    if ((state.mode === 'camera' || state.mode === 'simulate') && newMode === 'idle') {
+        if (appSettings.autoSave && state.history.length > 60) {
+            saveRec();
+        }
+    }
+
     // Clear old state
     state.mode = newMode;
-    state.history = [];
+    state.history = []; 
     state.totalTime = 0;
     state.framesSinceStart = 0;
     state.signalMean = 0;
@@ -332,15 +416,26 @@ async function setMode(newMode) {
     algoState.detectedBeats = [];
     algoState.lastBeatTime = 0;
 
+    // Reset Session
+    if (newMode === 'camera' || newMode === 'simulate') {
+        currentSession.id = Date.now();
+        currentSession.startTime = new Date().toISOString();
+    } else {
+        currentSession.id = null;
+        currentSession.startTime = null;
+    }
+
     // UI Reset
     instructionOverlay.classList.add('hidden');
     saveBtn.disabled = true;
+    saveBtn.innerText = "Save";
     reviewControls.classList.add('hidden');
     reviewControls.classList.remove('flex');
     simControls.classList.add('hidden');
     measuredBpmDisplay.classList.remove('text-green-500', 'text-purple-500', 'text-amber-500');
     measuredBpmDisplay.classList.add('text-slate-500');
     measuredBpmDisplay.innerText = "--";
+    previewCtx.clearRect(0,0,30,30); // Clear preview
 
     if (newMode === 'idle') {
         instructionOverlay.classList.remove('hidden');
@@ -358,7 +453,7 @@ async function setMode(newMode) {
         cameraToggleBtn.classList.remove('bg-sky-600', 'hover:bg-sky-500');
         saveBtn.disabled = false;
         await startCamera();
-        acquireWakeLock(); // Request Screen Stay On
+        acquireWakeLock();
     } else if (newMode === 'simulate') {
         modeBadge.innerText = "SIM";
         modeBadge.className = "text-[10px] px-1.5 py-0.5 rounded bg-purple-900/50 border border-purple-700 text-purple-300 font-bold uppercase";
@@ -366,13 +461,13 @@ async function setMode(newMode) {
         simulateBtn.classList.remove('bg-purple-600', 'hover:bg-purple-500');
         simControls.classList.remove('hidden');
         saveBtn.disabled = false;
-        acquireWakeLock(); // Good UX to keep screen on during sim too
+        acquireWakeLock();
     } else if (newMode === 'review') {
         modeBadge.innerText = "REVIEW";
         modeBadge.className = "text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 border border-amber-700 text-amber-300 font-bold uppercase";
         reviewControls.classList.remove('hidden');
         reviewControls.classList.add('flex');
-        releaseWakeLock(); // No need for lock in review
+        releaseWakeLock();
     }
 }
 
@@ -395,7 +490,7 @@ function exportGraphImage() {
     draw(); 
     ctx.save();
     ctx.fillStyle = "#0f172a"; 
-    ctx.fillRect(0, 0, 140, 60); // Background for text
+    ctx.fillRect(0, 0, 140, 60);
     ctx.fillStyle = '#f59e0b'; 
     ctx.font = 'bold 24px monospace';
     ctx.textAlign = 'left';
@@ -463,10 +558,22 @@ function normalizeSignal(val) {
 
 function processFrame() {
     if (!video || video.paused) return 0;
+    
+    // Draw frame to offscreen for analysis
     offCtx.drawImage(video, 0, 0, 30, 30);
+    
+    // If preview enabled, copy small canvas to visible canvas
+    if (appSettings.showPreview) {
+        previewCtx.drawImage(offscreenCanvas, 0, 0, 30, 30);
+    }
+
     const data = offCtx.getImageData(0, 0, 30, 30).data;
     let sum = 0;
-    for (let i = 0; i < data.length; i += 4) sum += data[i + 1];
+    for (let i = 0; i < data.length; i += 4) sum += data[i + 1]; // Green channel usually better, but Red ok for torch
+    // Note: Previous version used index +1 (Green) or Red. For blood with torch, Red is high, but modulation is visible in all.
+    // Let's stick to the logic provided: Green is usually i+1, Red is i. The previous code did i+1.
+    // Just ensuring we use standard RGBA. R=0, G=1, B=2.
+    
     const avg = sum / 900;
     
     if (state.framesSinceStart < 30) {
@@ -533,16 +640,40 @@ function updateHistory(val, thresh, beat, bpm, dt) {
 
 // Storage
 function saveRec() {
-    if(state.history.length < 60) return alert("Too short");
+    if(state.history.length < 60) {
+        // Only alert if we are manually saving, if auto-saving silently fail
+        if(!appSettings.autoSave || state.mode !== 'idle') alert("Too short to save");
+        return;
+    }
+    
     try {
-        const recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
-        recs.unshift({ id: Date.now(), timestamp: new Date().toISOString(), bpm: Math.round(algoState.bpm)||'--', data: state.history });
-        if(recs.length > 10) recs.pop();
+        let recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
+        const existingIndex = recs.findIndex(r => r.id === currentSession.id);
+        
+        const recordData = { 
+            id: currentSession.id || Date.now(), 
+            v: 1, // Versioning
+            timestamp: currentSession.startTime || new Date().toISOString(), 
+            bpm: Math.round(algoState.bpm)||'--', 
+            data: state.history 
+        };
+
+        if (existingIndex >= 0) {
+            // Update
+            recs[existingIndex] = recordData;
+        } else {
+            // Insert New
+            recs.unshift(recordData);
+            if(recs.length > 10) recs.pop();
+        }
+
         localStorage.setItem('hr_records', JSON.stringify(recs));
         renderList();
         saveBtn.innerText = "Saved";
         setTimeout(() => saveBtn.innerText = "Save", 1500);
-    } catch(e) { alert("Storage full"); }
+    } catch(e) { 
+        if(!appSettings.autoSave) alert("Storage full"); 
+    }
 }
 
 function renderList() {
@@ -593,16 +724,22 @@ function loop(t) {
 
     if(state.mode === 'camera' || state.mode === 'simulate') {
         state.totalTime += dt;
-        let s = state.mode === 'camera' ? processFrame() : generateSimulation(dt);
-        const res = processAlgo(s, t);
-        updateHistory(s, res.threshold, res.isBeat, Math.round(algoState.bpm), dt);
+        
+        // Auto Stop Check
+        if (appSettings.autoStopSeconds > 0 && state.totalTime >= appSettings.autoStopSeconds) {
+            setMode('idle');
+        } else {
+            let s = state.mode === 'camera' ? processFrame() : generateSimulation(dt);
+            const res = processAlgo(s, t);
+            updateHistory(s, res.threshold, res.isBeat, Math.round(algoState.bpm), dt);
+        }
     }
     draw();
     animationFrameId = requestAnimationFrame(loop);
 }
 
 function draw() {
-    ctx.fillStyle = '#0f172a'; // Clear with theme color
+    ctx.fillStyle = '#0f172a'; 
     ctx.fillRect(0,0,canvas.width,canvas.height); 
     
     let end = state.mode === 'review' ? state.reviewOffset : state.history.length;
@@ -667,6 +804,22 @@ function draw() {
     });
 }
 
+// Modal Logic
+function openSettings() {
+    settingsModal.classList.remove('hidden');
+    setTimeout(() => {
+        settingsContent.classList.remove('scale-95', 'opacity-0');
+        settingsContent.classList.add('scale-100', 'opacity-100');
+    }, 10);
+}
+
+function closeSettings() {
+    saveSettings(); // Auto save on close
+    settingsContent.classList.remove('scale-100', 'opacity-100');
+    settingsContent.classList.add('scale-95', 'opacity-0');
+    setTimeout(() => settingsModal.classList.add('hidden'), 200);
+}
+
 // Events
 historySlider.addEventListener('input', e => { state.reviewOffset = parseInt(e.target.value); });
 bpmSlider.addEventListener('input', e => { state.simBpm = parseInt(e.target.value); targetBpmDisplay.innerText = state.simBpm; });
@@ -676,6 +829,11 @@ saveBtn.onclick = saveRec;
 backToLiveBtn.onclick = () => setMode('idle');
 exportJsonBtn.onclick = exportAllData;
 exportImgBtn.onclick = exportGraphImage;
+
+// Settings Events
+settingsBtn.onclick = openSettings;
+closeSettingsBtn.onclick = closeSettings;
+settingsModal.onclick = (e) => { if(e.target === settingsModal) closeSettings(); };
 
 // Lifecycle
 document.addEventListener('visibilitychange', () => {
@@ -692,10 +850,10 @@ document.addEventListener('visibilitychange', () => {
 window.onpagehide = stopCamera;
 
 // Init
+loadSettings();
 renderList();
 loop(performance.now());
 
 </script>
 </body>
 </html>
-
