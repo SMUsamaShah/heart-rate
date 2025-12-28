@@ -111,6 +111,11 @@
             </div>
         </div>
 
+        <!-- Saturation Warning -->
+        <div id="saturationWarning" class="hidden absolute top-4 left-0 right-0 text-center pointer-events-none">
+            <span class="bg-rose-900/90 text-white text-[10px] font-bold px-3 py-1 rounded-full border border-rose-500 shadow-lg">⚠️ SIGNAL CLIPPING - Move finger slightly</span>
+        </div>
+
         <div class="absolute bottom-2 right-2 text-[9px] font-mono text-slate-600 pointer-events-none hidden sm:block">
             Gain: <span id="debugGain">1.0</span>x
         </div>
@@ -209,10 +214,21 @@
                         <label for="settingAutoSave" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer"></label>
                     </div>
                 </div>
+
+                <!-- Active Stats -->
+                <div class="border-t border-slate-700 pt-3 mt-2">
+                    <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Active Camera Stats</h4>
+                    <div id="cameraStats" class="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-400">
+                        <div class="bg-slate-900 p-1.5 rounded">Res: <span id="statRes" class="text-slate-200">--</span></div>
+                        <div class="bg-slate-900 p-1.5 rounded">FPS: <span id="statFps" class="text-slate-200">--</span></div>
+                        <div class="bg-slate-900 p-1.5 rounded">Exp: <span id="statExp" class="text-slate-200">--</span></div>
+                        <div class="bg-slate-900 p-1.5 rounded">ISO: <span id="statIso" class="text-slate-200">--</span></div>
+                    </div>
+                </div>
             </div>
 
-            <div class="mt-6 text-center">
-                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.1</span>
+            <div class="mt-4 text-center">
+                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.2 (Caps)</span>
             </div>
         </div>
     </div>
@@ -325,6 +341,7 @@ const measuredBpmDisplay = document.getElementById('bpmDisplay');
 const beatIndicator = document.getElementById('beatIndicator');
 const modeBadge = document.getElementById('modeBadge');
 const instructionOverlay = document.getElementById('instructionOverlay');
+const saturationWarning = document.getElementById('saturationWarning');
 const cameraToggleBtn = document.getElementById('cameraToggleBtn');
 const simulateBtn = document.getElementById('simulateBtn');
 const simControls = document.getElementById('simControls');
@@ -352,6 +369,10 @@ const closeSettingsBtn = document.getElementById('closeSettingsBtn');
 const settingPreview = document.getElementById('settingPreview');
 const settingAutoStop = document.getElementById('settingAutoStop');
 const settingAutoSave = document.getElementById('settingAutoSave');
+const statRes = document.getElementById('statRes');
+const statFps = document.getElementById('statFps');
+const statExp = document.getElementById('statExp');
+const statIso = document.getElementById('statIso');
 
 // --- Initialization ---
 function loadSettings() {
@@ -415,6 +436,7 @@ async function setMode(newMode) {
     algoState.bpm = 0;
     algoState.detectedBeats = [];
     algoState.lastBeatTime = 0;
+    saturationWarning.classList.add('hidden');
 
     // Reset Session
     if (newMode === 'camera' || newMode === 'simulate') {
@@ -507,35 +529,136 @@ function exportGraphImage() {
     requestAnimationFrame(draw); 
 }
 
-// Camera
+// --- Enhanced Camera Logic with Capabilities ---
 async function startCamera() {
     try {
+        // 1. Initial Constraint Request
+        // We request a range for frameRate to encourage 60fps if available
         const constraints = {
             audio: false,
             video: {
                 facingMode: 'environment',
                 width: { ideal: 320 }, 
                 height: { ideal: 240 },
-                frameRate: { ideal: 30 }
+                frameRate: { ideal: 60, min: 30 } 
             }
         };
+        
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = stream;
+        
+        // Wait for metadata to ensure track capabilities are readable
         await new Promise(r => video.onloadedmetadata = () => { video.play(); r(); });
         
         const track = stream.getVideoTracks()[0];
-        try {
-            const cap = track.getCapabilities();
-            if (cap.torch) await track.applyConstraints({ advanced: [{ torch: true }] });
-        } catch (e) {}
+        
+        // 2. Apply Advanced Constraints (Capabilities API)
+        await applyOptimizedConstraints(track);
+        
+        // 3. Update Debug Stats
+        updateCameraStats(track);
+
     } catch (err) {
-        alert("Camera unavailable.");
+        console.error("Camera Error:", err);
+        alert("Camera unavailable or permission denied.");
         setMode('idle');
     }
 }
 
+async function applyOptimizedConstraints(track) {
+    // Check what the browser/hardware supports
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    const settings = track.getSettings();
+    
+    // Build constraint object
+    const advanced = [];
+    const mainConstraints = {};
+
+    console.log("Device Capabilities:", caps);
+
+    // A. TORCH (Essential)
+    if (caps.torch) {
+        advanced.push({ torch: true });
+    }
+
+    // B. FOCUS (Prevent hunting)
+    // 'continuous' is often default, but 'manual' or 'single-shot' is better for PPG if we can lock it.
+    // However, without a slider to set focusDistance, 'continuous' (macro) is the safest automated bet.
+    if (caps.focusMode) {
+        if(caps.focusMode.includes('continuous')) mainConstraints.focusMode = 'continuous';
+        // If 'macro' was an option in a standardized way, we'd use it.
+    }
+
+    // C. WHITE BALANCE (Prevent red drift)
+    // If we can lock it to a manual temp or single-shot, do it.
+    if (caps.whiteBalanceMode) {
+        if (caps.whiteBalanceMode.includes('single-shot')) {
+             mainConstraints.whiteBalanceMode = 'single-shot'; 
+        } else if (caps.whiteBalanceMode.includes('manual')) {
+             // Manual is complex without knowing supported colorTemp ranges, 
+             // but 'single-shot' effectively locks it after convergence.
+        }
+    }
+
+    // D. EXPOSURE (Prevent oscillation & Clipping)
+    // Critical for PPG: prevent the camera from auto-adjusting gain when it sees the blood pulse.
+    // If we can't lock mode, we try to use exposureCompensation to dim the image (torch is bright).
+    if (caps.exposureCompensation) {
+        // -1 or -2 EV helps prevent the red channel from clipping against skin
+        // Check ranges
+        const minExp = caps.exposureCompensation.min || -2;
+        const maxExp = caps.exposureCompensation.max || 2;
+        // Target -1.5 or closest valid value
+        const target = Math.max(minExp, Math.min(maxExp, -1.0));
+        mainConstraints.exposureCompensation = target;
+    }
+    
+    // E. ISO / Gain (Raw data preference)
+    // Usually handled by exposureMode, but some browsers expose 'iso'
+    if (caps.iso && caps.iso.min) {
+        // Lower ISO = less noise
+        mainConstraints.iso = caps.iso.min; 
+    }
+
+    // F. Frame Rate (Temporal Resolution)
+    // If capabilities say we can go high, ensure we didn't get clamped by initial constraints
+    if (caps.frameRate && caps.frameRate.max >= 55) {
+        mainConstraints.frameRate = { ideal: 60 };
+    }
+
+    // Apply
+    const finalConstraints = {
+        advanced: advanced,
+        ...mainConstraints
+    };
+    
+    console.log("Applying optimized constraints:", finalConstraints);
+
+    try {
+        await track.applyConstraints(finalConstraints);
+    } catch (e) {
+        console.warn("Advanced constraints partially failed", e);
+        // Fallback: Just try torch
+        if (caps.torch) {
+            try { await track.applyConstraints({ advanced: [{ torch: true }] }); } catch(err){}
+        }
+    }
+}
+
+function updateCameraStats(track) {
+    const s = track.getSettings();
+    statRes.innerText = `${s.width}x${s.height}`;
+    statFps.innerText = s.frameRate ? s.frameRate.toFixed(1) : '--';
+    statExp.innerText = s.exposureCompensation ? s.exposureCompensation : (s.exposureMode || '--');
+    statIso.innerText = s.iso || '--';
+}
+
 function stopCamera() {
-    if (stream) stream.getTracks().forEach(t => t.stop());
+    if (stream) stream.getTracks().forEach(t => {
+        // Try to turn off torch before stopping to be polite to battery
+        try { t.applyConstraints({ advanced: [{ torch: false }] }); } catch(e){}
+        t.stop();
+    });
     stream = null;
     if (video) { video.pause(); video.srcObject = null; }
 }
@@ -569,20 +692,34 @@ function processFrame() {
 
     const data = offCtx.getImageData(0, 0, 30, 30).data;
     let sum = 0;
-    for (let i = 0; i < data.length; i += 4) sum += data[i + 1]; // Green channel usually better, but Red ok for torch
-    // Note: Previous version used index +1 (Green) or Red. For blood with torch, Red is high, but modulation is visible in all.
-    // Let's stick to the logic provided: Green is usually i+1, Red is i. The previous code did i+1.
-    // Just ensuring we use standard RGBA. R=0, G=1, B=2.
+    
+    // Standard RGBA: Green is i+1. 
+    // Green channel contains strongest PPG signal but saturates easily with torch.
+    // Red (i) is deeper, harder to saturate, but lower AC component.
+    // We use Green (i+1) primarily.
+    for (let i = 0; i < data.length; i += 4) {
+        sum += data[i + 1]; 
+    }
     
     const avg = sum / 900;
+    
+    // CLIPPING DETECTION
+    // If avg > 250, the sensor is likely saturated (flatlining), signal will be lost.
+    if (avg > 250) {
+        saturationWarning.classList.remove('hidden');
+    } else {
+        saturationWarning.classList.add('hidden');
+    }
     
     if (state.framesSinceStart < 30) {
         state.signalMean = avg;
         state.framesSinceStart++;
         return 0;
     }
+    
+    // Basic high-pass filter via mean subtraction
     state.signalMean = (state.signalMean * 0.95) + (avg * 0.05);
-    return normalizeSignal(state.signalMean - avg);
+    return normalizeSignal(state.signalMean - avg); // Inverted because higher absorption (blood) = lower light
 }
 
 function generateSimulation(dt) {
@@ -857,3 +994,4 @@ loop(performance.now());
 </script>
 </body>
 </html>
+
