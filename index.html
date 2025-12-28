@@ -53,11 +53,6 @@
         /* Toggle Switch */
         .toggle-checkbox:checked { right: 0; border-color: #38bdf8; }
         .toggle-checkbox:checked + .toggle-label { background-color: #38bdf8; }
-        
-        /* Modal Animation */
-        .modal-enter { opacity: 0; transform: scale(0.95); }
-        .modal-enter-active { opacity: 1; transform: scale(1); transition: all 0.2s; }
-        .modal-exit { opacity: 0; transform: scale(0.95); transition: all 0.2s; }
     </style>
 </head>
 <body class="h-screen w-screen flex flex-col">
@@ -90,7 +85,7 @@
                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
                     <span>AWAKE</span>
                  </div>
-                 <span id="storageInfo" class="text-[9px] font-mono text-slate-600">0MB</span>
+                 <span id="storageInfo" class="text-[9px] font-mono text-slate-600">0KB</span>
              </div>
         </div>
     </div>
@@ -237,7 +232,7 @@
             </div>
 
             <div class="mt-4 text-center">
-                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.4</span>
+                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.5 (Unlimited)</span>
             </div>
         </div>
     </div>
@@ -294,7 +289,6 @@ async function releaseWakeLock() {
  */
 const CONFIG = {
     maxHistorySeconds: 180, 
-    sampleRate: 60,
 };
 
 const appSettings = {
@@ -755,7 +749,7 @@ function updateHistory(val, thresh, beat, bpm, dt) {
     if (state.history.length > 10800) state.history.shift();
 }
 
-// Storage
+// Storage (UPDATED: COLUMNAR STRUCTURE, UNLIMITED)
 function saveRec() {
     if(state.history.length < 60) {
         if(!appSettings.autoSave || state.mode !== 'idle') alert("Too short to save");
@@ -766,19 +760,33 @@ function saveRec() {
         let recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
         const existingIndex = recs.findIndex(r => r.id === currentSession.id);
         
+        // Columnar conversion: unpack history into parallel arrays
+        const samples = [];
+        const thresholds = [];
+        const beatIndices = [];
+        
+        state.history.forEach((h, i) => {
+            samples.push(h.val);          
+            thresholds.push(h.threshold); 
+            if (h.beat) beatIndices.push(i);
+        });
+
         const recordData = { 
             id: currentSession.id || Date.now(), 
-            v: 1, 
+            v: 2, 
             timestamp: currentSession.startTime || new Date().toISOString(), 
-            bpm: Math.round(algoState.bpm)||'--', 
-            data: state.history 
+            avgBpm: Math.round(algoState.bpm)||'--', 
+            duration: state.totalTime,
+            samples: samples,
+            thresholds: thresholds,
+            beatIndices: beatIndices
         };
 
         if (existingIndex >= 0) {
             recs[existingIndex] = recordData;
         } else {
             recs.unshift(recordData);
-            if(recs.length > 10) recs.pop();
+            // Limit removed: will continue until storage exception
         }
 
         localStorage.setItem('hr_records', JSON.stringify(recs));
@@ -786,13 +794,24 @@ function saveRec() {
         saveBtn.innerText = "Saved";
         setTimeout(() => saveBtn.innerText = "Save", 1500);
     } catch(e) { 
+        console.error(e);
         if(!appSettings.autoSave) alert("Storage full"); 
     }
 }
 
 function renderList() {
-    const recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
-    storageInfo.innerText = (new Blob([JSON.stringify(recs)]).size/1024/1024).toFixed(2)+"MB";
+    let recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
+    
+    // Auto-discard V1 (legacy) data to prevent crash and clean storage
+    const validRecs = recs.filter(r => r.v === 2 && Array.isArray(r.samples));
+    if (validRecs.length !== recs.length) {
+        recs = validRecs;
+        localStorage.setItem('hr_records', JSON.stringify(recs));
+    }
+
+    const size = new Blob([JSON.stringify(recs)]).size;
+    storageInfo.innerText = (size/1024).toFixed(1)+"KB";
+    
     savedListContainer.innerHTML = '';
     if(!recs.length) return savedListContainer.appendChild(emptyState);
     
@@ -803,26 +822,62 @@ function renderList() {
         div.innerHTML = `
             <div>
                 <div class="font-bold text-sky-400 text-xs">${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
-                <div class="text-[10px] text-slate-500">${d.toLocaleDateString()}</div>
+                <div class="text-[10px] text-slate-500">${d.toLocaleDateString()} • ${r.duration.toFixed(1)}s</div>
             </div>
             <div class="flex items-center gap-3">
                 <div class="text-right">
                     <div class="text-[9px] text-slate-500 uppercase">Avg BPM</div>
-                    <div class="font-bold text-slate-200 text-sm">${r.bpm}</div>
+                    <div class="font-bold text-slate-200 text-sm">${r.avgBpm}</div>
                 </div>
                 <button class="del p-2 text-slate-500 hover:text-rose-400" data-id="${r.id}">✕</button>
             </div>`;
+        
         div.onclick = (e) => {
             if(e.target.classList.contains('del')) {
                 localStorage.setItem('hr_records', JSON.stringify(recs.filter(x=>x.id !== r.id)));
                 renderList();
             } else {
                 setMode('review');
-                state.history = r.data;
-                historySlider.min = Math.min(r.data.length, canvas.width);
-                historySlider.max = r.data.length;
-                historySlider.value = r.data.length;
-                measuredBpmDisplay.innerText = r.bpm;
+                
+                // Hydration: Reconstruct Grid & History from Columnar Data
+                const totalFrames = r.samples.length;
+                const avgDt = r.duration / totalFrames;
+                let accumulatedTime = 0;
+                let timeSinceLastGrid = 0;
+
+                state.history = r.samples.map((val, i) => {
+                    accumulatedTime += avgDt;
+                    timeSinceLastGrid += avgDt;
+
+                    let gridType = null;
+                    let gridLabel = null;
+                    
+                    if (timeSinceLastGrid >= 0.2) {
+                        const steps = Math.floor(timeSinceLastGrid / 0.2);
+                        timeSinceLastGrid -= (steps * 0.2);
+                        const prevTotal = accumulatedTime - (steps * 0.2);
+                        if (Math.floor(accumulatedTime) > Math.floor(prevTotal)) {
+                            gridType = 'major';
+                            gridLabel = Math.floor(accumulatedTime) + 's';
+                        } else {
+                            gridType = 'minor';
+                        }
+                    }
+
+                    return {
+                        val: val,
+                        threshold: r.thresholds[i],
+                        beat: r.beatIndices.includes(i),
+                        bpm: r.avgBpm,
+                        grid: gridType,
+                        label: gridLabel
+                    };
+                });
+
+                historySlider.min = Math.min(r.samples.length, canvas.width);
+                historySlider.max = r.samples.length;
+                historySlider.value = r.samples.length;
+                measuredBpmDisplay.innerText = r.avgBpm;
                 measuredBpmDisplay.className = "text-4xl font-mono font-bold text-amber-500 tracking-tighter";
             }
         };
