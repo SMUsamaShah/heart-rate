@@ -206,6 +206,15 @@
                     <input type="number" id="settingAutoStop" min="0" max="300" class="w-16 bg-slate-900 border border-slate-600 rounded p-1 text-center text-sm text-white focus:border-sky-500 outline-none">
                 </div>
 
+                <!-- BPM Window Setting (Count Based) -->
+                <div class="flex items-center justify-between">
+                    <label class="text-sm text-slate-300">
+                        BPM Averaging (Beats)
+                        <span class="block text-[10px] text-slate-500">How many beats to average</span>
+                    </label>
+                    <input type="number" id="settingBpmWindow" min="2" max="50" class="w-16 bg-slate-900 border border-slate-600 rounded p-1 text-center text-sm text-white focus:border-sky-500 outline-none">
+                </div>
+
                 <!-- Auto Save -->
                 <div class="flex items-center justify-between">
                     <label class="text-sm text-slate-300">Auto-Save on Stop</label>
@@ -228,7 +237,7 @@
             </div>
 
             <div class="mt-4 text-center">
-                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.2 (Caps)</span>
+                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.4</span>
             </div>
         </div>
     </div>
@@ -291,6 +300,7 @@ const CONFIG = {
 const appSettings = {
     showPreview: false,
     autoStopSeconds: 0,
+    bpmCalculationWindow: 8, // Default 8 beats
     autoSave: false
 };
 
@@ -369,6 +379,7 @@ const closeSettingsBtn = document.getElementById('closeSettingsBtn');
 const settingPreview = document.getElementById('settingPreview');
 const settingAutoStop = document.getElementById('settingAutoStop');
 const settingAutoSave = document.getElementById('settingAutoSave');
+const settingBpmWindow = document.getElementById('settingBpmWindow'); 
 const statRes = document.getElementById('statRes');
 const statFps = document.getElementById('statFps');
 const statExp = document.getElementById('statExp');
@@ -387,15 +398,21 @@ function loadSettings() {
     settingPreview.checked = appSettings.showPreview;
     settingAutoStop.value = appSettings.autoStopSeconds;
     settingAutoSave.checked = appSettings.autoSave;
+    settingBpmWindow.value = appSettings.bpmCalculationWindow || 8;
     togglePreviewVisibility();
 }
 
 function saveSettings() {
     appSettings.showPreview = settingPreview.checked;
     appSettings.autoStopSeconds = parseInt(settingAutoStop.value) || 0;
+    appSettings.bpmCalculationWindow = parseInt(settingBpmWindow.value) || 8;
     appSettings.autoSave = settingAutoSave.checked;
     localStorage.setItem('pulse_settings', JSON.stringify(appSettings));
     togglePreviewVisibility();
+    
+    // Reset algo beat buffer when settings change
+    algoState.detectedBeats = [];
+    algoState.bpm = 0;
 }
 
 function togglePreviewVisibility() {
@@ -532,8 +549,6 @@ function exportGraphImage() {
 // --- Enhanced Camera Logic with Capabilities ---
 async function startCamera() {
     try {
-        // 1. Initial Constraint Request
-        // We request a range for frameRate to encourage 60fps if available
         const constraints = {
             audio: false,
             video: {
@@ -547,15 +562,13 @@ async function startCamera() {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = stream;
         
-        // Wait for metadata to ensure track capabilities are readable
         await new Promise(r => video.onloadedmetadata = () => { video.play(); r(); });
         
         const track = stream.getVideoTracks()[0];
         
-        // 2. Apply Advanced Constraints (Capabilities API)
+        // Apply Advanced Constraints
         await applyOptimizedConstraints(track);
         
-        // 3. Update Debug Stats
         updateCameraStats(track);
 
     } catch (err) {
@@ -566,79 +579,50 @@ async function startCamera() {
 }
 
 async function applyOptimizedConstraints(track) {
-    // Check what the browser/hardware supports
     const caps = track.getCapabilities ? track.getCapabilities() : {};
-    const settings = track.getSettings();
     
-    // Build constraint object
     const advanced = [];
     const mainConstraints = {};
 
     console.log("Device Capabilities:", caps);
 
-    // A. TORCH (Essential)
+    // A. TORCH
     if (caps.torch) {
         advanced.push({ torch: true });
     }
 
-    // B. FOCUS (Prevent hunting)
-    // 'continuous' is often default, but 'manual' or 'single-shot' is better for PPG if we can lock it.
-    // However, without a slider to set focusDistance, 'continuous' (macro) is the safest automated bet.
-    if (caps.focusMode) {
-        if(caps.focusMode.includes('continuous')) mainConstraints.focusMode = 'continuous';
-        // If 'macro' was an option in a standardized way, we'd use it.
+    // B. FOCUS
+    if (caps.focusMode && caps.focusMode.includes('continuous')) {
+        mainConstraints.focusMode = 'continuous';
     }
 
-    // C. WHITE BALANCE (Prevent red drift)
-    // If we can lock it to a manual temp or single-shot, do it.
-    if (caps.whiteBalanceMode) {
-        if (caps.whiteBalanceMode.includes('single-shot')) {
-             mainConstraints.whiteBalanceMode = 'single-shot'; 
-        } else if (caps.whiteBalanceMode.includes('manual')) {
-             // Manual is complex without knowing supported colorTemp ranges, 
-             // but 'single-shot' effectively locks it after convergence.
-        }
+    // C. WHITE BALANCE
+    if (caps.whiteBalanceMode && caps.whiteBalanceMode.includes('single-shot')) {
+         mainConstraints.whiteBalanceMode = 'single-shot'; 
     }
 
-    // D. EXPOSURE (Prevent oscillation & Clipping)
-    // Critical for PPG: prevent the camera from auto-adjusting gain when it sees the blood pulse.
-    // If we can't lock mode, we try to use exposureCompensation to dim the image (torch is bright).
+    // D. EXPOSURE
     if (caps.exposureCompensation) {
-        // -1 or -2 EV helps prevent the red channel from clipping against skin
-        // Check ranges
         const minExp = caps.exposureCompensation.min || -2;
         const maxExp = caps.exposureCompensation.max || 2;
-        // Target -1.5 or closest valid value
-        const target = Math.max(minExp, Math.min(maxExp, -1.0));
-        mainConstraints.exposureCompensation = target;
+        mainConstraints.exposureCompensation = Math.max(minExp, Math.min(maxExp, -1.0));
     }
     
-    // E. ISO / Gain (Raw data preference)
-    // Usually handled by exposureMode, but some browsers expose 'iso'
+    // E. ISO
     if (caps.iso && caps.iso.min) {
-        // Lower ISO = less noise
         mainConstraints.iso = caps.iso.min; 
     }
 
-    // F. Frame Rate (Temporal Resolution)
-    // If capabilities say we can go high, ensure we didn't get clamped by initial constraints
+    // F. Frame Rate
     if (caps.frameRate && caps.frameRate.max >= 55) {
         mainConstraints.frameRate = { ideal: 60 };
     }
 
-    // Apply
-    const finalConstraints = {
-        advanced: advanced,
-        ...mainConstraints
-    };
+    const finalConstraints = { advanced: advanced, ...mainConstraints };
     
-    console.log("Applying optimized constraints:", finalConstraints);
-
     try {
         await track.applyConstraints(finalConstraints);
     } catch (e) {
-        console.warn("Advanced constraints partially failed", e);
-        // Fallback: Just try torch
         if (caps.torch) {
             try { await track.applyConstraints({ advanced: [{ torch: true }] }); } catch(err){}
         }
@@ -655,7 +639,6 @@ function updateCameraStats(track) {
 
 function stopCamera() {
     if (stream) stream.getTracks().forEach(t => {
-        // Try to turn off torch before stopping to be polite to battery
         try { t.applyConstraints({ advanced: [{ torch: false }] }); } catch(e){}
         t.stop();
     });
@@ -682,29 +665,20 @@ function normalizeSignal(val) {
 function processFrame() {
     if (!video || video.paused) return 0;
     
-    // Draw frame to offscreen for analysis
     offCtx.drawImage(video, 0, 0, 30, 30);
     
-    // If preview enabled, copy small canvas to visible canvas
     if (appSettings.showPreview) {
         previewCtx.drawImage(offscreenCanvas, 0, 0, 30, 30);
     }
 
     const data = offCtx.getImageData(0, 0, 30, 30).data;
     let sum = 0;
-    
-    // Standard RGBA: Green is i+1. 
-    // Green channel contains strongest PPG signal but saturates easily with torch.
-    // Red (i) is deeper, harder to saturate, but lower AC component.
-    // We use Green (i+1) primarily.
     for (let i = 0; i < data.length; i += 4) {
         sum += data[i + 1]; 
     }
     
     const avg = sum / 900;
     
-    // CLIPPING DETECTION
-    // If avg > 250, the sensor is likely saturated (flatlining), signal will be lost.
     if (avg > 250) {
         saturationWarning.classList.remove('hidden');
     } else {
@@ -717,9 +691,8 @@ function processFrame() {
         return 0;
     }
     
-    // Basic high-pass filter via mean subtraction
     state.signalMean = (state.signalMean * 0.95) + (avg * 0.05);
-    return normalizeSignal(state.signalMean - avg); // Inverted because higher absorption (blood) = lower light
+    return normalizeSignal(state.signalMean - avg); 
 }
 
 function generateSimulation(dt) {
@@ -737,6 +710,7 @@ function processAlgo(val, time) {
     algoState.threshold = Math.max(algoState.runningMax * 0.5, 0.05);
     if (val > algoState.runningMax) algoState.runningMax = val;
     let isBeat = false;
+    
     if (val > algoState.threshold && (time - algoState.lastBeatTime) > algoState.refractoryPeriod) {
         if (algoState.runningMax > 0.15) {
             algoState.lastBeatTime = time;
@@ -745,7 +719,13 @@ function processAlgo(val, time) {
             setTimeout(() => beatIndicator.classList.remove('bg-red-500', 'scale-150'), 100);
             
             algoState.detectedBeats.push(time);
-            if(algoState.detectedBeats.length > 8) algoState.detectedBeats.shift();
+            
+            // --- COUNT BASED LOGIC (Reverted) ---
+            const limit = appSettings.bpmCalculationWindow || 8;
+            while(algoState.detectedBeats.length > limit) {
+                 algoState.detectedBeats.shift();
+            }
+
             if(algoState.detectedBeats.length >= 2) {
                 let sum = 0;
                 for(let i=1; i<algoState.detectedBeats.length; i++) sum += (algoState.detectedBeats[i]-algoState.detectedBeats[i-1]);
@@ -778,7 +758,6 @@ function updateHistory(val, thresh, beat, bpm, dt) {
 // Storage
 function saveRec() {
     if(state.history.length < 60) {
-        // Only alert if we are manually saving, if auto-saving silently fail
         if(!appSettings.autoSave || state.mode !== 'idle') alert("Too short to save");
         return;
     }
@@ -789,17 +768,15 @@ function saveRec() {
         
         const recordData = { 
             id: currentSession.id || Date.now(), 
-            v: 1, // Versioning
+            v: 1, 
             timestamp: currentSession.startTime || new Date().toISOString(), 
             bpm: Math.round(algoState.bpm)||'--', 
             data: state.history 
         };
 
         if (existingIndex >= 0) {
-            // Update
             recs[existingIndex] = recordData;
         } else {
-            // Insert New
             recs.unshift(recordData);
             if(recs.length > 10) recs.pop();
         }
@@ -862,7 +839,6 @@ function loop(t) {
     if(state.mode === 'camera' || state.mode === 'simulate') {
         state.totalTime += dt;
         
-        // Auto Stop Check
         if (appSettings.autoStopSeconds > 0 && state.totalTime >= appSettings.autoStopSeconds) {
             setMode('idle');
         } else {
@@ -994,4 +970,5 @@ loop(performance.now());
 </script>
 </body>
 </html>
+
 
