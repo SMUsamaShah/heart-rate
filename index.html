@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Pulse Monitor v2</title>
+    <title>Pulse Monitor v2.3</title>
     
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -31,7 +31,6 @@
         .scroller::-webkit-scrollbar-thumb { background: #475569; border-radius: 2px; }
         
         .monitor-grid {
-            background-image: linear-gradient(rgba(255, 65, 65, 0.1) 1px, transparent 1px);
             background-size: 100% 20px;
         }
         .control-panel {
@@ -57,7 +56,6 @@
 </head>
 <body class="h-screen w-screen flex flex-col">
 
-    <!-- Header / Stats -->
     <div class="flex-none pt-safe-top px-4 pb-2 flex justify-between items-center bg-slate-900/80 border-b border-slate-700/50 z-10 backdrop-blur-md">
         <div class="flex flex-col pt-2">
             <span class="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Heart Rate</span>
@@ -69,12 +67,10 @@
         
         <div class="text-right flex flex-col items-end pt-2 gap-1">
              <div class="flex items-center gap-2">
-                 <!-- Tiny Preview Canvas -->
                  <canvas id="previewCanvas" width="30" height="30" class="w-8 h-8 rounded border border-slate-600 bg-black hidden pixelated"></canvas>
                  
                  <div id="beatIndicator" class="w-3 h-3 rounded-full bg-slate-800 transition-colors duration-75 inline-block"></div>
                  
-                 <!-- Settings Button -->
                  <button id="settingsBtn" class="p-1 text-slate-400 hover:text-white transition-colors">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                  </button>
@@ -85,17 +81,15 @@
                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
                     <span>AWAKE</span>
                  </div>
-                 <span id="storageInfo" class="text-[9px] font-mono text-slate-600">0KB</span>
+                 <span id="storageInfo" class="text-[9px] font-mono text-slate-600">--</span>
              </div>
         </div>
     </div>
 
-    <!-- Main Chart Area -->
     <div class="flex-grow relative monitor-grid bg-black overflow-hidden group" id="canvasContainer">
         <canvas id="ppgCanvas"></canvas>
         <video id="videoElement" playsinline style="display:none;"></video>
         
-        <!-- Instructions Overlay -->
         <div id="instructionOverlay" class="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/60 z-10 transition-opacity duration-300">
             <div class="text-center p-6 max-w-sm">
                 <div class="text-slate-200 font-bold text-lg mb-2">Ready to Measure</div>
@@ -106,16 +100,18 @@
             </div>
         </div>
 
-        <!-- Saturation Warning -->
         <div id="saturationWarning" class="hidden absolute top-4 left-0 right-0 text-center pointer-events-none">
             <span class="bg-rose-900/90 text-white text-[10px] font-bold px-3 py-1 rounded-full border border-rose-500 shadow-lg">⚠️ SIGNAL CLIPPING - Move finger slightly</span>
+        </div>
+        
+        <div id="torchWarning" class="hidden absolute top-12 left-0 right-0 text-center pointer-events-none">
+            <span class="bg-amber-900/90 text-white text-[10px] font-bold px-3 py-1 rounded-full border border-amber-500 shadow-lg">⚠️ Camera flash unavailable - Ensure good lighting</span>
         </div>
 
         <div class="absolute bottom-2 right-2 text-[9px] font-mono text-slate-600 pointer-events-none hidden sm:block">
             Gain: <span id="debugGain">1.0</span>x
         </div>
 
-        <!-- Review Controls -->
         <div id="reviewControls" class="absolute bottom-4 left-4 right-4 bg-slate-800/95 p-4 rounded-xl border border-slate-600/50 hidden flex-col gap-3 z-20 shadow-2xl backdrop-blur-xl">
             <div class="flex justify-between text-xs text-slate-300 font-bold">
                 <span>Timeline</span>
@@ -133,9 +129,7 @@
         </div>
     </div>
 
-    <!-- Controls & List -->
     <div class="flex-none flex flex-col h-[35vh] min-h-[240px] control-panel border-t border-slate-700/50 z-20">
-        <!-- Action Buttons -->
         <div class="p-3 border-b border-slate-700/50 flex flex-col gap-3">
             <div class="grid grid-cols-3 gap-2">
                 <button id="cameraToggleBtn" class="h-11 bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white font-bold rounded-lg shadow-lg shadow-sky-900/20 flex flex-col items-center justify-center text-xs transition-all">
@@ -148,8 +142,7 @@
                     Save
                 </button>
             </div>
-            <!-- Sim Slider -->
-            <div id="simControls" class="hidden bg-slate-800/80 p-2.5 rounded-lg border border-slate-700 animate-fade-in">
+            <div id="simControls" class="hidden bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
                 <div class="flex justify-between items-center mb-1">
                     <label class="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Sim Rate</label>
                     <span id="targetBpmValue" class="text-[10px] font-mono bg-purple-900/50 text-purple-200 px-1.5 py-0.5 rounded">75</span>
@@ -158,21 +151,23 @@
             </div>
         </div>
 
-        <!-- History Header -->
         <div class="px-4 py-2 bg-slate-800/50 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex justify-between items-center backdrop-blur-sm">
             <span>Recent History</span>
-            <button id="exportJsonBtn" class="text-sky-400 hover:text-white p-1" title="Download JSON">
-                Export All ⬇
-            </button>
+            <div class="flex gap-2">
+                <button id="deleteOldestBtn" class="text-rose-400 hover:text-white p-1" title="Delete Oldest 10">
+                    Del Oldest
+                </button>
+                <button id="exportJsonBtn" class="text-sky-400 hover:text-white p-1" title="Download JSON">
+                    Export All ⬇
+                </button>
+            </div>
         </div>
 
-        <!-- List -->
         <div id="savedListContainer" class="flex-grow overflow-y-auto scroller p-2 space-y-1.5 pb-safe-bottom">
             <div class="text-center text-slate-600 text-xs py-8 italic" id="emptyState">No saved records</div>
         </div>
     </div>
 
-    <!-- Settings Modal -->
     <div id="settingsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
         <div class="bg-slate-800 w-11/12 max-w-sm rounded-xl border border-slate-600 shadow-2xl p-5 transform transition-all duration-200 scale-95 opacity-0" id="settingsContent">
             <div class="flex justify-between items-center mb-4">
@@ -183,7 +178,6 @@
             </div>
 
             <div class="space-y-4">
-                <!-- Toggle Preview -->
                 <div class="flex items-center justify-between">
                     <label class="text-sm text-slate-300">Camera Preview</label>
                     <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
@@ -192,7 +186,6 @@
                     </div>
                 </div>
 
-                <!-- Auto Stop -->
                 <div class="flex items-center justify-between">
                     <label class="text-sm text-slate-300">
                         Auto-Stop (seconds)
@@ -201,7 +194,6 @@
                     <input type="number" id="settingAutoStop" min="0" max="300" class="w-16 bg-slate-900 border border-slate-600 rounded p-1 text-center text-sm text-white focus:border-sky-500 outline-none">
                 </div>
 
-                <!-- BPM Window Setting (Count Based) -->
                 <div class="flex items-center justify-between">
                     <label class="text-sm text-slate-300">
                         BPM Averaging (Beats)
@@ -209,8 +201,15 @@
                     </label>
                     <input type="number" id="settingBpmWindow" min="2" max="50" class="w-16 bg-slate-900 border border-slate-600 rounded p-1 text-center text-sm text-white focus:border-sky-500 outline-none">
                 </div>
+                
+                <div class="flex items-center justify-between">
+                    <label class="text-sm text-slate-300">
+                        Max Recordings
+                        <span class="block text-[10px] text-slate-500">0 = No limit (until full)</span>
+                    </label>
+                    <input type="number" id="settingMaxRecords" min="0" max="1000" class="w-16 bg-slate-900 border border-slate-600 rounded p-1 text-center text-sm text-white focus:border-sky-500 outline-none">
+                </div>
 
-                <!-- Auto Save -->
                 <div class="flex items-center justify-between">
                     <label class="text-sm text-slate-300">Auto-Save on Stop</label>
                     <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
@@ -219,9 +218,8 @@
                     </div>
                 </div>
 
-                <!-- Active Stats -->
                 <div class="border-t border-slate-700 pt-3 mt-2">
-                    <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Active Camera Stats</h4>
+                    <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Camera Specs</h4>
                     <div id="cameraStats" class="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-400">
                         <div class="bg-slate-900 p-1.5 rounded">Res: <span id="statRes" class="text-slate-200">--</span></div>
                         <div class="bg-slate-900 p-1.5 rounded">FPS: <span id="statFps" class="text-slate-200">--</span></div>
@@ -232,7 +230,7 @@
             </div>
 
             <div class="mt-4 text-center">
-                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.5 (Unlimited)</span>
+                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.3</span>
             </div>
         </div>
     </div>
@@ -266,11 +264,12 @@ let wakeLock = null;
 const wakeLockIndicator = document.getElementById('wakeLockIndicator');
 
 async function acquireWakeLock() {
-    if ('wakeLock' in navigator) {
+    if ('wakeLock' in navigator && wakeLock === null) {
         try {
             wakeLock = await navigator.wakeLock.request('screen');
             wakeLockIndicator.classList.remove('hidden');
             wakeLock.addEventListener('release', () => {
+                wakeLock = null;
                 wakeLockIndicator.classList.add('hidden');
             });
         } catch (err) { console.warn('Wake Lock error', err); }
@@ -279,7 +278,8 @@ async function acquireWakeLock() {
 
 async function releaseWakeLock() {
     if (wakeLock !== null) {
-        try { await wakeLock.release(); wakeLock = null; } catch(e) {}
+        try { await wakeLock.release(); } catch(e) {}
+        wakeLock = null;
         wakeLockIndicator.classList.add('hidden');
     }
 }
@@ -287,15 +287,13 @@ async function releaseWakeLock() {
 /**
  * APP SETTINGS & STATE
  */
-const CONFIG = {
-    maxHistorySeconds: 180, 
-};
 
 const appSettings = {
     showPreview: false,
     autoStopSeconds: 0,
-    bpmCalculationWindow: 8, // Default 8 beats
-    autoSave: false
+    bpmCalculationWindow: 8,
+    autoSave: false,
+    maxRecords: 50
 };
 
 const state = {
@@ -312,6 +310,8 @@ const state = {
     simPhase: 0,
     simBpm: 75
 };
+
+let reviewData = null;
 
 const currentSession = {
     id: null,
@@ -330,12 +330,10 @@ const algoState = {
 
 // Processing Setup
 const video = document.getElementById('videoElement');
-const offscreenCanvas = document.createElement('canvas');
+const offscreenCanvas = document.getElementById('previewCanvas');
 const offCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
 let stream = null;
 let animationFrameId = null; 
-offscreenCanvas.width = 30;
-offscreenCanvas.height = 30;
 
 // DOM
 const canvas = document.getElementById('ppgCanvas');
@@ -346,6 +344,7 @@ const beatIndicator = document.getElementById('beatIndicator');
 const modeBadge = document.getElementById('modeBadge');
 const instructionOverlay = document.getElementById('instructionOverlay');
 const saturationWarning = document.getElementById('saturationWarning');
+const torchWarning = document.getElementById('torchWarning');
 const cameraToggleBtn = document.getElementById('cameraToggleBtn');
 const simulateBtn = document.getElementById('simulateBtn');
 const simControls = document.getElementById('simControls');
@@ -362,10 +361,9 @@ const emptyState = document.getElementById('emptyState');
 const storageInfo = document.getElementById('storageInfo');
 const exportJsonBtn = document.getElementById('exportJsonBtn');
 const exportImgBtn = document.getElementById('exportImgBtn');
+const deleteOldestBtn = document.getElementById('deleteOldestBtn');
 
-// New Elements
-const previewCanvas = document.getElementById('previewCanvas');
-const previewCtx = previewCanvas.getContext('2d');
+// Settings DOM
 const settingsBtn = document.getElementById('settingsBtn');
 const settingsModal = document.getElementById('settingsModal');
 const settingsContent = document.getElementById('settingsContent');
@@ -373,7 +371,8 @@ const closeSettingsBtn = document.getElementById('closeSettingsBtn');
 const settingPreview = document.getElementById('settingPreview');
 const settingAutoStop = document.getElementById('settingAutoStop');
 const settingAutoSave = document.getElementById('settingAutoSave');
-const settingBpmWindow = document.getElementById('settingBpmWindow'); 
+const settingBpmWindow = document.getElementById('settingBpmWindow');
+const settingMaxRecords = document.getElementById('settingMaxRecords');
 const statRes = document.getElementById('statRes');
 const statFps = document.getElementById('statFps');
 const statExp = document.getElementById('statExp');
@@ -393,6 +392,7 @@ function loadSettings() {
     settingAutoStop.value = appSettings.autoStopSeconds;
     settingAutoSave.checked = appSettings.autoSave;
     settingBpmWindow.value = appSettings.bpmCalculationWindow || 8;
+    settingMaxRecords.value = appSettings.maxRecords || 50;
     togglePreviewVisibility();
 }
 
@@ -400,6 +400,7 @@ function saveSettings() {
     appSettings.showPreview = settingPreview.checked;
     appSettings.autoStopSeconds = parseInt(settingAutoStop.value) || 0;
     appSettings.bpmCalculationWindow = parseInt(settingBpmWindow.value) || 8;
+    appSettings.maxRecords = parseInt(settingMaxRecords.value) || 0;
     appSettings.autoSave = settingAutoSave.checked;
     localStorage.setItem('pulse_settings', JSON.stringify(appSettings));
     togglePreviewVisibility();
@@ -410,8 +411,8 @@ function saveSettings() {
 }
 
 function togglePreviewVisibility() {
-    if (appSettings.showPreview) previewCanvas.classList.remove('hidden');
-    else previewCanvas.classList.add('hidden');
+    if (appSettings.showPreview) offscreenCanvas.classList.remove('hidden');
+    else offscreenCanvas.classList.add('hidden');
 }
 
 // Resize
@@ -424,16 +425,27 @@ resize();
 
 // Mode Handling
 async function setMode(newMode) {
-    if (state.mode === 'camera' && newMode !== 'camera') {
+    const prevMode = state.mode;
+    
+    // Safety: Stop loop processing immediately to prevent data race during async save
+    if (prevMode === 'camera' || prevMode === 'simulate') {
+        state.mode = 'transition'; 
+    }
+    
+    if (prevMode === 'camera' && newMode !== 'camera') {
         stopCamera();
         releaseWakeLock();
     }
     
     // Auto-save check when stopping a recording session
-    if ((state.mode === 'camera' || state.mode === 'simulate') && newMode === 'idle') {
+    if ((prevMode === 'camera' || prevMode === 'simulate') && newMode === 'idle') {
         if (appSettings.autoSave && state.history.length > 60) {
-            saveRec();
+            await saveRec();
         }
+    }
+    
+    if (prevMode === 'review' && newMode !== 'review') {
+        reviewData = null; // Clear memory
     }
 
     // Clear old state
@@ -448,6 +460,7 @@ async function setMode(newMode) {
     algoState.detectedBeats = [];
     algoState.lastBeatTime = 0;
     saturationWarning.classList.add('hidden');
+    torchWarning.classList.add('hidden');
 
     // Reset Session
     if (newMode === 'camera' || newMode === 'simulate') {
@@ -468,7 +481,7 @@ async function setMode(newMode) {
     measuredBpmDisplay.classList.remove('text-green-500', 'text-purple-500', 'text-amber-500');
     measuredBpmDisplay.classList.add('text-slate-500');
     measuredBpmDisplay.innerText = "--";
-    previewCtx.clearRect(0,0,30,30); // Clear preview
+    offCtx.clearRect(0,0,30,30); // Clear preview
 
     if (newMode === 'idle') {
         instructionOverlay.classList.remove('hidden');
@@ -520,7 +533,7 @@ function exportAllData() {
 }
 
 function exportGraphImage() {
-    draw(); 
+    draw(state.mode === 'review' ? reviewData : state.history); 
     ctx.save();
     ctx.fillStyle = "#0f172a"; 
     ctx.fillRect(0, 0, 140, 60);
@@ -537,8 +550,23 @@ function exportGraphImage() {
     link.download = `ecg_${Date.now()}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
-    requestAnimationFrame(draw); 
+    requestAnimationFrame(() => draw(state.mode === 'review' ? reviewData : state.history)); 
 }
+
+// Delete Oldest Logic
+deleteOldestBtn.onclick = () => {
+    try {
+        let recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
+        if (recs.length === 0) return alert("No records to delete");
+        
+        // Remove 10 oldest (from end of array)
+        recs.splice(recs.length - 10, 10);
+        
+        localStorage.setItem('hr_records', JSON.stringify(recs));
+        renderList();
+        alert("Deleted oldest records");
+    } catch(e) { console.error(e); }
+};
 
 // --- Enhanced Camera Logic with Capabilities ---
 async function startCamera() {
@@ -556,14 +584,17 @@ async function startCamera() {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = stream;
         
-        await new Promise(r => video.onloadedmetadata = () => { video.play(); r(); });
+        // Wait for metadata but DON'T play yet
+        await new Promise(r => video.onloadedmetadata = r);
         
         const track = stream.getVideoTracks()[0];
         
-        // Apply Advanced Constraints
+        // Apply constraints BEFORE playing to avoid flashless frames
         await applyOptimizedConstraints(track);
-        
         updateCameraStats(track);
+        
+        // NOW start playing
+        video.play();
 
     } catch (err) {
         console.error("Camera Error:", err);
@@ -577,8 +608,6 @@ async function applyOptimizedConstraints(track) {
     
     const advanced = [];
     const mainConstraints = {};
-
-    console.log("Device Capabilities:", caps);
 
     // A. TORCH
     if (caps.torch) {
@@ -616,9 +645,19 @@ async function applyOptimizedConstraints(track) {
     
     try {
         await track.applyConstraints(finalConstraints);
+        torchWarning.classList.add('hidden');
     } catch (e) {
+        console.warn('Could not apply advanced constraints:', e);
         if (caps.torch) {
-            try { await track.applyConstraints({ advanced: [{ torch: true }] }); } catch(err){}
+            try { 
+                await track.applyConstraints({ advanced: [{ torch: true }] }); 
+                torchWarning.classList.add('hidden');
+            } catch(err) {
+                console.error('Torch unavailable:', err);
+                torchWarning.classList.remove('hidden');
+            }
+        } else {
+            torchWarning.classList.remove('hidden');
         }
     }
 }
@@ -657,21 +696,19 @@ function normalizeSignal(val) {
 }
 
 function processFrame() {
-    if (!video || video.paused) return 0;
-    
     offCtx.drawImage(video, 0, 0, 30, 30);
-    
-    if (appSettings.showPreview) {
-        previewCtx.drawImage(offscreenCanvas, 0, 0, 30, 30);
-    }
 
     const data = offCtx.getImageData(0, 0, 30, 30).data;
     let sum = 0;
-    for (let i = 0; i < data.length; i += 4) {
-        sum += data[i + 1]; 
+    let count = 0;
+    
+    // Spatial Undersampling (Sample every 16th pixel)
+    for (let i = 0; i < data.length; i += 16) {
+        sum += data[i + 1]; // Green channel
+        count++;
     }
     
-    const avg = sum / 900;
+    const avg = sum / count;
     
     if (avg > 250) {
         saturationWarning.classList.remove('hidden');
@@ -714,7 +751,6 @@ function processAlgo(val, time) {
             
             algoState.detectedBeats.push(time);
             
-            // --- COUNT BASED LOGIC (Reverted) ---
             const limit = appSettings.bpmCalculationWindow || 8;
             while(algoState.detectedBeats.length > limit) {
                  algoState.detectedBeats.shift();
@@ -737,56 +773,74 @@ function processAlgo(val, time) {
 
 function updateHistory(val, thresh, beat, bpm, dt) {
     state.timeSinceLastMinorGrid += dt;
-    let gridType = null, gridLabel = null;
-    if (state.timeSinceLastMinorGrid >= 0.2) {
-        const steps = Math.floor(state.timeSinceLastMinorGrid / 0.2);
-        state.timeSinceLastMinorGrid -= (steps * 0.2);
-        if (Math.floor(state.totalTime) > Math.floor(state.totalTime - steps*0.2)) {
-            gridType = 'major'; gridLabel = Math.floor(state.totalTime) + 's';
-        } else gridType = 'minor';
-    }
-    state.history.push({ val, threshold: thresh, beat, grid: gridType, label: gridLabel, bpm });
+    state.timeSinceLastMinorGrid %= 0.2;
+    
+    state.history.push({ val, threshold: thresh, beat, bpm });
+    
+    // 10,800 frames approx 3 minutes at 60fps
     if (state.history.length > 10800) state.history.shift();
 }
 
-// Storage (UPDATED: COLUMNAR STRUCTURE, UNLIMITED)
-function saveRec() {
-    if(state.history.length < 60) {
-        if(!appSettings.autoSave || state.mode !== 'idle') alert("Too short to save");
+// Storage
+async function saveRec() {
+    // FIX: Snapshot critical state variables BEFORE yielding to any async operations (like storage estimate)
+    const historySnapshot = [...state.history];
+    const sessionIdSnapshot = currentSession.id;
+    const startTimeSnapshot = currentSession.startTime;
+    const bpmSnapshot = algoState.bpm;
+    const totalTimeSnapshot = state.totalTime;
+
+    if(historySnapshot.length < 60) {
+        if(!appSettings.autoSave) alert("Too short to save");
         return;
+    }
+
+    if (navigator.storage && navigator.storage.estimate) {
+        try {
+            const estimate = await navigator.storage.estimate();
+            if (estimate.quota > 0) {
+                const usageRatio = estimate.usage / estimate.quota;
+                if (usageRatio > 0.95) return alert("Storage full. Delete old recordings to continue.");
+                if (usageRatio > 0.85) alert(`Storage almost full (${(estimate.usage/1024/1024).toFixed(1)}MB used). Consider deleting old recordings.`);
+            }
+        } catch(e) { console.warn("Quota check failed", e); }
     }
     
     try {
         let recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
-        const existingIndex = recs.findIndex(r => r.id === currentSession.id);
         
-        // Columnar conversion: unpack history into parallel arrays
+        if (appSettings.maxRecords > 0 && recs.length >= appSettings.maxRecords) {
+            recs.splice(appSettings.maxRecords - 1); // Make room
+        }
+
+        const existingIndex = recs.findIndex(r => r.id === sessionIdSnapshot);
+        
+        // Columnar pack history using SNAPSHOT
         const samples = [];
-        const thresholds = [];
         const beatIndices = [];
+        const bpms = [];
         
-        state.history.forEach((h, i) => {
-            samples.push(h.val);          
-            thresholds.push(h.threshold); 
+        historySnapshot.forEach((h, i) => {
+            samples.push(h.val);           
             if (h.beat) beatIndices.push(i);
+            bpms.push(h.bpm);
         });
 
         const recordData = { 
-            id: currentSession.id || Date.now(), 
+            id: sessionIdSnapshot || Date.now(), 
             v: 2, 
-            timestamp: currentSession.startTime || new Date().toISOString(), 
-            avgBpm: Math.round(algoState.bpm)||'--', 
-            duration: state.totalTime,
+            timestamp: startTimeSnapshot || new Date().toISOString(), 
+            avgBpm: Math.round(bpmSnapshot)||'--', 
+            duration: totalTimeSnapshot,
             samples: samples,
-            thresholds: thresholds,
-            beatIndices: beatIndices
+            beatIndices: beatIndices,
+            bpms: bpms
         };
 
         if (existingIndex >= 0) {
             recs[existingIndex] = recordData;
         } else {
             recs.unshift(recordData);
-            // Limit removed: will continue until storage exception
         }
 
         localStorage.setItem('hr_records', JSON.stringify(recs));
@@ -795,22 +849,29 @@ function saveRec() {
         setTimeout(() => saveBtn.innerText = "Save", 1500);
     } catch(e) { 
         console.error(e);
-        if(!appSettings.autoSave) alert("Storage full"); 
+        if (e.name === 'QuotaExceededError') {
+            alert("Storage full. Please delete old recordings.");
+        } else if(!appSettings.autoSave) {
+            alert("Save failed"); 
+        }
     }
 }
 
 function renderList() {
     let recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
     
-    // Auto-discard V1 (legacy) data to prevent crash and clean storage
     const validRecs = recs.filter(r => r.v === 2 && Array.isArray(r.samples));
     if (validRecs.length !== recs.length) {
         recs = validRecs;
         localStorage.setItem('hr_records', JSON.stringify(recs));
     }
 
-    const size = new Blob([JSON.stringify(recs)]).size;
-    storageInfo.innerText = (size/1024).toFixed(1)+"KB";
+    const jsonStr = JSON.stringify(recs);
+    const sizeMB = (new Blob([jsonStr]).size / 1024 / 1024).toFixed(2);
+    storageInfo.innerText = `${sizeMB}MB / ~5MB`;
+    if(sizeMB > 4.5) storageInfo.className = "text-[9px] font-mono text-rose-500 font-bold";
+    else if(sizeMB > 3.5) storageInfo.className = "text-[9px] font-mono text-amber-500 font-bold";
+    else storageInfo.className = "text-[9px] font-mono text-slate-600";
     
     savedListContainer.innerHTML = '';
     if(!recs.length) return savedListContainer.appendChild(emptyState);
@@ -839,46 +900,38 @@ function renderList() {
             } else {
                 setMode('review');
                 
-                // Hydration: Reconstruct Grid & History from Columnar Data
-                const totalFrames = r.samples.length;
-                const avgDt = r.duration / totalFrames;
-                let accumulatedTime = 0;
-                let timeSinceLastGrid = 0;
+                // Initialize simulation state for threshold recalculation
+                let runningMax = 0.1;
+                const decayRate = algoState.decayRate;
 
-                state.history = r.samples.map((val, i) => {
-                    accumulatedTime += avgDt;
-                    timeSinceLastGrid += avgDt;
-
-                    let gridType = null;
-                    let gridLabel = null;
+                reviewData = r.samples.map((val, i) => {
+                    // Re-run the threshold logic from processAlgo
+                    runningMax *= decayRate;
+                    const computedThreshold = Math.max(runningMax * 0.5, 0.05);
+                    if (val > runningMax) runningMax = val;
                     
-                    if (timeSinceLastGrid >= 0.2) {
-                        const steps = Math.floor(timeSinceLastGrid / 0.2);
-                        timeSinceLastGrid -= (steps * 0.2);
-                        const prevTotal = accumulatedTime - (steps * 0.2);
-                        if (Math.floor(accumulatedTime) > Math.floor(prevTotal)) {
-                            gridType = 'major';
-                            gridLabel = Math.floor(accumulatedTime) + 's';
-                        } else {
-                            gridType = 'minor';
-                        }
-                    }
-
                     return {
                         val: val,
-                        threshold: r.thresholds[i],
+                        threshold: computedThreshold,
                         beat: r.beatIndices.includes(i),
-                        bpm: r.avgBpm,
-                        grid: gridType,
-                        label: gridLabel
+                        bpm: (r.bpms && r.bpms[i]) ? r.bpms[i] : r.avgBpm
                     };
                 });
+                
+                // Attach duration for grid calculation
+                reviewData.duration = r.duration;
 
-                historySlider.min = Math.min(r.samples.length, canvas.width);
+                historySlider.min = 0;
                 historySlider.max = r.samples.length;
                 historySlider.value = r.samples.length;
+                
+                // Initialize reviewOffset to match the slider (end of recording)
+                state.reviewOffset = r.samples.length;
+                
                 measuredBpmDisplay.innerText = r.avgBpm;
                 measuredBpmDisplay.className = "text-4xl font-mono font-bold text-amber-500 tracking-tighter";
+                
+                draw(reviewData);
             }
         };
         savedListContainer.appendChild(div);
@@ -902,45 +955,99 @@ function loop(t) {
             updateHistory(s, res.threshold, res.isBeat, Math.round(algoState.bpm), dt);
         }
     }
-    draw();
+    
+    if (state.mode === 'review') {
+        draw(reviewData);
+    } else {
+        draw(state.history);
+    }
+    
     animationFrameId = requestAnimationFrame(loop);
 }
 
-function draw() {
+function draw(dataSource) {
+    const data = dataSource || [];
+    
     ctx.fillStyle = '#0f172a'; 
     ctx.fillRect(0,0,canvas.width,canvas.height); 
     
-    let end = state.mode === 'review' ? state.reviewOffset : state.history.length;
+    if (!data.length) return;
+    
+    let end = state.mode === 'review' ? state.reviewOffset : data.length;
     let start = Math.max(0, end - canvas.width);
     
-    if(state.mode === 'review' && state.history.length) {
-        const pt = state.history[Math.min(end, state.history.length-1)];
-        if(pt) {
-            measuredBpmDisplay.innerText = pt.bpm || '--';
-            reviewTimeDisplay.innerText = `-${((state.history.length-end)/60).toFixed(1)}s`;
+    // Update review text
+    if(state.mode === 'review') {
+        // Dynamic BPM Calculation
+        const totalDur = data.duration || 0;
+        const totalSamples = data.length || 1;
+        const avgDt = (totalDur && totalSamples) ? (totalDur / totalSamples) : (1/60);
+        
+        let displayBpm = '--';
+        const win = appSettings.bpmCalculationWindow || 8;
+        const recentBeats = [];
+        
+        // Find last 'win' beats before 'end'
+        for(let i = end-1; i >= 0 && recentBeats.length < win; i--) {
+            if(data[i].beat) recentBeats.push(i);
         }
+        
+        if(recentBeats.length >= 2) {
+            // Indices are newest to oldest
+            const newest = recentBeats[0];
+            const oldest = recentBeats[recentBeats.length-1];
+            const diffSecs = (newest - oldest) * avgDt;
+            if(diffSecs > 0) {
+                const bpm = 60 * (recentBeats.length - 1) / diffSecs;
+                displayBpm = Math.round(bpm);
+            }
+        } else if (data[end-1] && data[end-1].bpm) {
+            // Fallback to stored BPM if available and calculation fails (e.g. very start)
+            displayBpm = data[end-1].bpm;
+        }
+
+        measuredBpmDisplay.innerText = displayBpm;
+        reviewTimeDisplay.innerText = `-${((data.length-end) * avgDt).toFixed(1)}s`;
     }
 
-    const data = state.history.slice(start, end);
-    if(!data.length) return;
+    const viewData = data.slice(start, end);
+    if(!viewData.length) return;
 
     const cy = canvas.height/2;
     const sy = canvas.height/2.2;
     const my = v => cy - v*sy;
 
-    // Grid
+    const totalDuration = state.mode === 'review' ? (data.duration || state.totalTime) : state.totalTime;
+    const safeDur = totalDuration || 1; 
+
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
     ctx.font = "9px monospace";
-    for(let i=0; i<data.length; i++) {
-        if(data[i].grid) {
+
+    for(let i=0; i<viewData.length; i++) {
+        // Calculate relative time of this pixel in the total recording
+        const absIndex = start + i;
+        const timeAtPixel = (absIndex / Math.max(data.length, 1)) * safeDur;
+        
+        // Check if we crossed a grid line (using floor logic)
+        const prevIndex = start + i - 1;
+        const prevTimeAtPixel = (prevIndex / Math.max(data.length, 1)) * safeDur;
+        
+        // Minor grid (0.2s)
+        if (Math.floor(timeAtPixel * 5) !== Math.floor(prevTimeAtPixel * 5)) {
             ctx.beginPath();
-            ctx.strokeStyle = data[i].grid === 'major' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)';
-            ctx.moveTo(i,0); ctx.lineTo(i,canvas.height); ctx.stroke();
-            if(data[i].label) {
-                ctx.fillStyle = 'rgba(255,255,255,0.3)';
-                ctx.fillText(data[i].label, i, canvas.height-2);
-            }
+            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+            ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+        }
+
+        // Major grid (1.0s)
+        if (Math.floor(timeAtPixel) !== Math.floor(prevTimeAtPixel)) {
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.fillText(Math.floor(timeAtPixel) + 's', i, canvas.height-2);
         }
     }
 
@@ -948,7 +1055,7 @@ function draw() {
     ctx.beginPath();
     ctx.strokeStyle = 'rgba(255,200,0,0.3)';
     ctx.setLineDash([4,4]);
-    data.forEach((d,i) => i===0?ctx.moveTo(i,my(d.threshold)):ctx.lineTo(i,my(d.threshold)));
+    viewData.forEach((d,i) => i===0?ctx.moveTo(i,my(d.threshold)):ctx.lineTo(i,my(d.threshold)));
     ctx.stroke(); ctx.setLineDash([]);
 
     // Signal
@@ -956,18 +1063,18 @@ function draw() {
     ctx.beginPath();
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
-    data.forEach((d,i) => i===0?ctx.moveTo(i,my(d.val)):ctx.lineTo(i,my(d.val)));
+    viewData.forEach((d,i) => i===0?ctx.moveTo(i,my(d.val)):ctx.lineTo(i,my(d.val)));
     ctx.stroke();
 
     // Fill
-    ctx.lineTo(data.length-1, canvas.height);
+    ctx.lineTo(viewData.length-1, canvas.height);
     ctx.lineTo(0, canvas.height);
     ctx.fillStyle = color + "20";
     ctx.fill();
 
     // Beats
     ctx.fillStyle = "#fff";
-    data.forEach((d,i) => {
+    viewData.forEach((d,i) => {
         if(d.beat) { ctx.beginPath(); ctx.arc(i, my(d.val), 3, 0, Math.PI*2); ctx.fill(); }
     });
 }
@@ -982,7 +1089,7 @@ function openSettings() {
 }
 
 function closeSettings() {
-    saveSettings(); // Auto save on close
+    saveSettings(); 
     settingsContent.classList.remove('scale-100', 'opacity-100');
     settingsContent.classList.add('scale-95', 'opacity-0');
     setTimeout(() => settingsModal.classList.add('hidden'), 200);
@@ -1003,13 +1110,23 @@ settingsBtn.onclick = openSettings;
 closeSettingsBtn.onclick = closeSettings;
 settingsModal.onclick = (e) => { if(e.target === settingsModal) closeSettings(); };
 
-// Lifecycle
 document.addEventListener('visibilitychange', () => {
     if(document.hidden) {
         cancelAnimationFrame(animationFrameId);
         if(state.mode === 'camera') {
             stopCamera();
-            setMode('idle'); 
+            releaseWakeLock();
+            
+            // Pause but keep data
+            state.mode = 'idle';
+            modeBadge.innerText = "PAUSED";
+            modeBadge.className = "text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 border border-amber-700 text-amber-300 font-bold uppercase";
+            
+            saveBtn.disabled = false;
+            saveBtn.innerText = "Save Partial";
+            
+            cameraToggleBtn.classList.remove('bg-rose-600', 'hover:bg-rose-500');
+            cameraToggleBtn.classList.add('bg-sky-600', 'hover:bg-sky-500');
         }
     } else {
         loop(performance.now());
@@ -1025,5 +1142,3 @@ loop(performance.now());
 </script>
 </body>
 </html>
-
-
