@@ -16,22 +16,57 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
+        :root {
+            --slate-900: #0f172a;
+            --slate-800: #1e293b;
+            --slate-700: #334155;
+            --slate-600: #475569;
+            --slate-500: #64748b;
+            --slate-400: #94a3b8;
+            --slate-200: #e2e8f0;
+            --sky-400: #38bdf8;
+            --sky-500: #0ea5e9;
+            --sky-600: #0284c7;
+            --sky-700: #0369a1;
+            --purple-500: #a855f7;
+            --purple-600: #9333ea;
+            --red-500: #ef4444;
+            --amber-500: #f59e0b;
+            --amber-700: #b45309;
+            --rose-400: #fb7185;
+            --rose-500: #f43f5e;
+        }
         body {
-            background-color: #0f172a;
-            color: #e2e8f0;
+            background-color: var(--slate-900);
+            color: var(--slate-200);
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             overflow: hidden; 
             touch-action: none; 
             -webkit-user-select: none;
             user-select: none;
         }
-        canvas { display: block; width: 100%; height: 100%; }
-        .scroller::-webkit-scrollbar { width: 4px; }
-        .scroller::-webkit-scrollbar-track { background: rgba(30, 41, 59, 0.3); }
-        .scroller::-webkit-scrollbar-thumb { background: #475569; border-radius: 2px; }
-        
-        .monitor-grid {
-            background-size: 100% 20px;
+        canvas { 
+            display: block; 
+            width: 100%; 
+            height: 100%; 
+        }
+        .pixelated { 
+            image-rendering: pixelated; 
+            image-rendering: -moz-crisp-edges; 
+            image-rendering: crisp-edges; 
+        }
+        .hidden-vid { 
+            display: none; 
+        }
+        .scroller::-webkit-scrollbar { 
+            width: 4px; 
+        }
+        .scroller::-webkit-scrollbar-track { 
+            background: rgba(30, 41, 59, 0.3); 
+        }
+        .scroller::-webkit-scrollbar-thumb { 
+            background: var(--slate-600); 
+            border-radius: 2px; 
         }
         .control-panel {
             backdrop-filter: blur(12px);
@@ -39,19 +74,31 @@
             padding-bottom: env(safe-area-inset-bottom);
         }
         input[type=range].scrubber {
-            -webkit-appearance: none; background: transparent;
+            -webkit-appearance: none; 
+            background: transparent;
         }
         input[type=range].scrubber::-webkit-slider-runnable-track {
-            height: 6px; background: #334155; border-radius: 3px;
+            height: 6px; 
+            background: var(--slate-700); 
+            border-radius: 3px;
         }
         input[type=range].scrubber::-webkit-slider-thumb {
-            -webkit-appearance: none; height: 18px; width: 18px;
-            border-radius: 50%; background: #38bdf8; margin-top: -6px;
-            cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            -webkit-appearance: none; 
+            height: 18px; 
+            width: 18px;
+            border-radius: 50%; 
+            background: var(--sky-400); 
+            margin-top: -6px;
+            cursor: pointer; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
-        /* Toggle Switch */
-        .toggle-checkbox:checked { right: 0; border-color: #38bdf8; }
-        .toggle-checkbox:checked + .toggle-label { background-color: #38bdf8; }
+        .toggle-checkbox:checked { 
+            right: 0; 
+            border-color: var(--sky-400); 
+        }
+        .toggle-checkbox:checked + .toggle-label { 
+            background-color: var(--sky-400); 
+        }
     </style>
 </head>
 <body class="h-screen w-screen flex flex-col">
@@ -68,17 +115,12 @@
         <div class="text-right flex flex-col items-end pt-2 gap-1">
              <div class="flex items-center gap-2">
                  <canvas id="previewCanvas" width="30" height="30" class="w-8 h-8 rounded border border-slate-600 bg-black hidden pixelated"></canvas>
-                 
                  <div id="beatIndicator" class="w-3 h-3 rounded-full bg-slate-800 transition-colors duration-75 inline-block"></div>
-                 
-                 <button id="settingsBtn" class="p-1 text-slate-400 hover:text-white transition-colors">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                 </button>
+                 <button id="settingsBtn" class="p-1 text-slate-400 hover:text-white transition-colors text-xl">⚙</button>
              </div>
-             
              <div class="flex items-center gap-2 mt-1">
                  <div id="wakeLockIndicator" class="hidden text-[9px] text-amber-500 font-bold flex items-center gap-1 opacity-80">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                    <span class="text-sm">☀</span>
                     <span>AWAKE</span>
                  </div>
                  <span id="storageInfo" class="text-[9px] font-mono text-slate-600">--</span>
@@ -86,9 +128,9 @@
         </div>
     </div>
 
-    <div class="flex-grow relative monitor-grid bg-black overflow-hidden group" id="canvasContainer">
+    <div class="flex-grow relative bg-black overflow-hidden group" id="canvasContainer">
         <canvas id="ppgCanvas"></canvas>
-        <video id="videoElement" playsinline style="display:none;"></video>
+        <video id="videoElement" playsinline class="hidden-vid"></video>
         
         <div id="instructionOverlay" class="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/60 z-10 transition-opacity duration-300">
             <div class="text-center p-6 max-w-sm">
@@ -172,16 +214,14 @@
         <div class="bg-slate-800 w-11/12 max-w-sm rounded-xl border border-slate-600 shadow-2xl p-5 transform transition-all duration-200 scale-95 opacity-0" id="settingsContent">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-slate-100 font-bold text-lg">Settings</h3>
-                <button id="closeSettingsBtn" class="text-slate-400 hover:text-white">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
+                <button id="closeSettingsBtn" class="text-slate-400 hover:text-white text-2xl leading-none">✕</button>
             </div>
 
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
                     <label class="text-sm text-slate-300">Camera Preview</label>
                     <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
-                        <input type="checkbox" name="toggle" id="settingPreview" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                        <input type="checkbox" id="settingPreview" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
                         <label for="settingPreview" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer"></label>
                     </div>
                 </div>
@@ -213,7 +253,7 @@
                 <div class="flex items-center justify-between">
                     <label class="text-sm text-slate-300">Auto-Save on Stop</label>
                     <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
-                        <input type="checkbox" name="toggle" id="settingAutoSave" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                        <input type="checkbox" id="settingAutoSave" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
                         <label for="settingAutoSave" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer"></label>
                     </div>
                 </div>
@@ -236,59 +276,69 @@
     </div>
 
 <script>
-/**
- * PWA SETUP
- */
-(function setupPWA() {
-    const iconSvg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='#0f172a'/><path d='M256 448l-30-30C118 322 48 250 48 162C48 90 106 32 178 32c40 0 78 22 96 56c18-34 56-56 96-56c72 0 130 58 130 130c0 88-70 160-178 256l-30 30z' fill='#ef4444'/></svg>`;
-    const iconUrl = "data:image/svg+xml;base64," + btoa(iconSvg);
-    document.getElementById('dynamic-favicon').href = iconUrl;
-    document.getElementById('dynamic-apple-icon').href = iconUrl;
+// ============================================================================
+// PWA Setup
+// ============================================================================
+(function() {
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='#0f172a'/><path d='M256 448l-30-30C118 322 48 250 48 162 48 90 106 32 178 32c40 0 78 22 96 56 18-34 56-56 96-56 72 0 130 58 130 130 0 88-70 160-178 256l-30 30z' fill='#ef4444'/></svg>`;
+    const url = "data:image/svg+xml;base64," + btoa(svg);
+    
+    document.getElementById('dynamic-favicon').href = url;
+    document.getElementById('dynamic-apple-icon').href = url;
+    
     const manifest = {
-        "name": "Pulse Monitor",
-        "short_name": "Pulse",
-        "start_url": ".",
-        "display": "standalone",
-        "background_color": "#0f172a",
-        "theme_color": "#0f172a",
-        "orientation": "portrait",
-        "icons": [{ "src": iconUrl, "sizes": "512x512", "type": "image/svg+xml" }]
+        name: "Pulse Monitor",
+        short_name: "Pulse",
+        start_url: ".",
+        display: "standalone",
+        background_color: "#0f172a",
+        theme_color: "#0f172a",
+        orientation: "portrait",
+        icons: [{src: url, sizes: "512x512", type: "image/svg+xml"}]
     };
-    document.getElementById('dynamic-manifest').href = "data:application/manifest+json;base64," + btoa(JSON.stringify(manifest));
+    
+    document.getElementById('dynamic-manifest').href = 
+        "data:application/manifest+json;base64," + btoa(JSON.stringify(manifest));
 })();
 
-/**
- * WAKE LOCK
- */
+// ============================================================================
+// Wake Lock
+// ============================================================================
 let wakeLock = null;
 const wakeLockIndicator = document.getElementById('wakeLockIndicator');
 
 async function acquireWakeLock() {
-    if ('wakeLock' in navigator && wakeLock === null) {
+    if ('wakeLock' in navigator && !wakeLock) {
         try {
             wakeLock = await navigator.wakeLock.request('screen');
             wakeLockIndicator.classList.remove('hidden');
+            
             wakeLock.addEventListener('release', () => {
                 wakeLock = null;
                 wakeLockIndicator.classList.add('hidden');
             });
-        } catch (err) { console.warn('Wake Lock error', err); }
+        } catch (err) {
+            console.warn('Wake Lock error', err);
+        }
     }
 }
 
 async function releaseWakeLock() {
-    if (wakeLock !== null) {
-        try { await wakeLock.release(); } catch(e) {}
+    if (wakeLock) {
+        try {
+            await wakeLock.release();
+        } catch(e) {
+            console.warn('Wake Lock release error', e);
+        }
         wakeLock = null;
         wakeLockIndicator.classList.add('hidden');
     }
 }
 
-/**
- * APP SETTINGS & STATE
- */
-
-const appSettings = {
+// ============================================================================
+// Settings & State
+// ============================================================================
+const cfg = {
     showPreview: false,
     autoStopSeconds: 0,
     bpmCalculationWindow: 8,
@@ -300,12 +350,11 @@ const state = {
     mode: 'idle',
     lastTime: 0,
     totalTime: 0,
-    history: [], 
+    history: [],
     reviewOffset: 0,
-    timeSinceLastMinorGrid: 0,
     signalMean: 0,
     framesSinceStart: 0,
-    recentValues: [], 
+    recentValues: [],
     currentGain: 1.0,
     simPhase: 0,
     simBpm: 75
@@ -313,123 +362,241 @@ const state = {
 
 let reviewData = null;
 
-const currentSession = {
+const session = {
     id: null,
     startTime: null
 };
 
-const algoState = {
+const algo = {
     lastBeatTime: 0,
-    refractoryPeriod: 250, 
-    runningMax: 0.1, 
+    refractoryPeriod: 250,
+    runningMax: 0.1,
     threshold: 0.05,
-    decayRate: 0.99,        
-    detectedBeats: [],      
+    decayRate: 0.99,
+    detectedBeats: [],
     bpm: 0
 };
 
-// Processing Setup
-const video = document.getElementById('videoElement');
-const offscreenCanvas = document.getElementById('previewCanvas');
-const offCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+// ============================================================================
+// DOM Elements
+// ============================================================================
+const $ = id => document.getElementById(id);
+
+const els = {
+    video: $('videoElement'),
+    canvas: $('ppgCanvas'),
+    preview: $('previewCanvas'),
+    container: $('canvasContainer'),
+    bpmDisplay: $('bpmDisplay'),
+    beatIndicator: $('beatIndicator'),
+    modeBadge: $('modeBadge'),
+    instructionOverlay: $('instructionOverlay'),
+    saturationWarning: $('saturationWarning'),
+    torchWarning: $('torchWarning'),
+    cameraBtn: $('cameraToggleBtn'),
+    simulateBtn: $('simulateBtn'),
+    simControls: $('simControls'),
+    bpmSlider: $('bpmSlider'),
+    targetBpmValue: $('targetBpmValue'),
+    debugGain: $('debugGain'),
+    saveBtn: $('saveBtn'),
+    savedList: $('savedListContainer'),
+    reviewControls: $('reviewControls'),
+    historySlider: $('historySlider'),
+    backToLiveBtn: $('backToLiveBtn'),
+    reviewTimeDisplay: $('reviewTimeDisplay'),
+    emptyState: $('emptyState'),
+    storageInfo: $('storageInfo'),
+    exportJsonBtn: $('exportJsonBtn'),
+    exportImgBtn: $('exportImgBtn'),
+    deleteOldestBtn: $('deleteOldestBtn'),
+    settingsBtn: $('settingsBtn'),
+    settingsModal: $('settingsModal'),
+    settingsContent: $('settingsContent'),
+    closeSettingsBtn: $('closeSettingsBtn'),
+    settingPreview: $('settingPreview'),
+    settingAutoStop: $('settingAutoStop'),
+    settingAutoSave: $('settingAutoSave'),
+    settingBpmWindow: $('settingBpmWindow'),
+    settingMaxRecords: $('settingMaxRecords'),
+    statRes: $('statRes'),
+    statFps: $('statFps'),
+    statExp: $('statExp'),
+    statIso: $('statIso')
+};
+
+const ctx = els.canvas.getContext('2d');
+const offCtx = els.preview.getContext('2d', { willReadFrequently: true });
+
 let stream = null;
-let animationFrameId = null; 
+let animationFrameId = null;
 
-// DOM
-const canvas = document.getElementById('ppgCanvas');
-const ctx = canvas.getContext('2d');
-const container = document.getElementById('canvasContainer');
-const measuredBpmDisplay = document.getElementById('bpmDisplay');
-const beatIndicator = document.getElementById('beatIndicator');
-const modeBadge = document.getElementById('modeBadge');
-const instructionOverlay = document.getElementById('instructionOverlay');
-const saturationWarning = document.getElementById('saturationWarning');
-const torchWarning = document.getElementById('torchWarning');
-const cameraToggleBtn = document.getElementById('cameraToggleBtn');
-const simulateBtn = document.getElementById('simulateBtn');
-const simControls = document.getElementById('simControls');
-const bpmSlider = document.getElementById('bpmSlider');
-const targetBpmDisplay = document.getElementById('targetBpmValue');
-const debugGain = document.getElementById('debugGain');
-const saveBtn = document.getElementById('saveBtn');
-const savedListContainer = document.getElementById('savedListContainer');
-const reviewControls = document.getElementById('reviewControls');
-const historySlider = document.getElementById('historySlider');
-const backToLiveBtn = document.getElementById('backToLiveBtn');
-const reviewTimeDisplay = document.getElementById('reviewTimeDisplay');
-const emptyState = document.getElementById('emptyState');
-const storageInfo = document.getElementById('storageInfo');
-const exportJsonBtn = document.getElementById('exportJsonBtn');
-const exportImgBtn = document.getElementById('exportImgBtn');
-const deleteOldestBtn = document.getElementById('deleteOldestBtn');
+// ============================================================================
+// Mode Configuration
+// ============================================================================
+const modeConfig = {
+    idle: {
+        badge: {
+            text: "IDLE",
+            class: "text-[10px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-400 font-bold uppercase"
+        },
+        camera: {
+            bg: ['bg-sky-600', 'hover:bg-sky-500'],
+            rm: ['bg-rose-600', 'hover:bg-rose-500']
+        },
+        simulate: {
+            bg: ['bg-purple-600', 'hover:bg-purple-500'],
+            rm: ['bg-rose-600', 'hover:bg-rose-500']
+        }
+    },
+    camera: {
+        badge: {
+            text: "CAMERA",
+            class: "text-[10px] px-1.5 py-0.5 rounded bg-sky-900/50 border border-sky-700 text-sky-300 font-bold uppercase"
+        },
+        camera: {
+            bg: ['bg-rose-600', 'hover:bg-rose-500'],
+            rm: ['bg-sky-600', 'hover:bg-sky-500']
+        }
+    },
+    simulate: {
+        badge: {
+            text: "SIM",
+            class: "text-[10px] px-1.5 py-0.5 rounded bg-purple-900/50 border border-purple-700 text-purple-300 font-bold uppercase"
+        },
+        simulate: {
+            bg: ['bg-rose-600', 'hover:bg-rose-500'],
+            rm: ['bg-purple-600', 'hover:bg-purple-500']
+        }
+    },
+    review: {
+        badge: {
+            text: "REVIEW",
+            class: "text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 border border-amber-700 text-amber-300 font-bold uppercase"
+        }
+    }
+};
 
-// Settings DOM
-const settingsBtn = document.getElementById('settingsBtn');
-const settingsModal = document.getElementById('settingsModal');
-const settingsContent = document.getElementById('settingsContent');
-const closeSettingsBtn = document.getElementById('closeSettingsBtn');
-const settingPreview = document.getElementById('settingPreview');
-const settingAutoStop = document.getElementById('settingAutoStop');
-const settingAutoSave = document.getElementById('settingAutoSave');
-const settingBpmWindow = document.getElementById('settingBpmWindow');
-const settingMaxRecords = document.getElementById('settingMaxRecords');
-const statRes = document.getElementById('statRes');
-const statFps = document.getElementById('statFps');
-const statExp = document.getElementById('statExp');
-const statIso = document.getElementById('statIso');
+// ============================================================================
+// Helper Functions
+// ============================================================================
+const toggleClasses = (el, add, remove) => {
+    if (remove) el.classList.remove(...remove);
+    if (add) el.classList.add(...add);
+};
 
-// --- Initialization ---
+// ============================================================================
+// Shared Algorithm Functions
+// ============================================================================
+function calculateThreshold(samples) {
+    const decayRate = algo.decayRate;
+    let runningMax = 0.1;
+    const results = [];
+    
+    samples.forEach(val => {
+        runningMax *= decayRate;
+        if (val > runningMax) runningMax = val;
+        
+        const threshold = Math.max(runningMax * 0.5, 0.05);
+        results.push({ threshold, runningMax });
+    });
+    
+    return results;
+}
+
+function detectBeats(samples, thresholds) {
+    const beatIndices = [];
+    let lastBeatIndex = -1000;
+    const minGap = 15;
+    
+    samples.forEach((val, i) => {
+        const { threshold, runningMax } = thresholds[i];
+        
+        if (val > threshold && 
+            (i - lastBeatIndex) > minGap && 
+            runningMax > 0.15) {
+            beatIndices.push(i);
+            lastBeatIndex = i;
+        }
+    });
+    
+    return beatIndices;
+}
+
+function calculateBPM(beatIndices, totalDuration, windowSize = 8) {
+    if (beatIndices.length < 2) return null;
+    
+    const recent = beatIndices.slice(-windowSize);
+    if (recent.length < 2) return null;
+    
+    const totalSamples = beatIndices[beatIndices.length - 1] + 1;
+    const avgDt = totalDuration / totalSamples;
+    
+    const timeSpan = (recent[recent.length - 1] - recent[0]) * avgDt;
+    const bpm = 60 * (recent.length - 1) / timeSpan;
+    
+    return Math.round(bpm);
+}
+
+// ============================================================================
+// Settings Management
+// ============================================================================
 function loadSettings() {
     const saved = localStorage.getItem('pulse_settings');
     if (saved) {
         try {
-            const parsed = JSON.parse(saved);
-            Object.assign(appSettings, parsed);
-        } catch(e) {}
+            Object.assign(cfg, JSON.parse(saved));
+        } catch(e) {
+            console.error('Failed to load settings', e);
+        }
     }
-    // Update UI
-    settingPreview.checked = appSettings.showPreview;
-    settingAutoStop.value = appSettings.autoStopSeconds;
-    settingAutoSave.checked = appSettings.autoSave;
-    settingBpmWindow.value = appSettings.bpmCalculationWindow || 8;
-    settingMaxRecords.value = appSettings.maxRecords || 50;
-    togglePreviewVisibility();
+    
+    els.settingPreview.checked = cfg.showPreview;
+    els.settingAutoStop.value = cfg.autoStopSeconds;
+    els.settingAutoSave.checked = cfg.autoSave;
+    els.settingBpmWindow.value = cfg.bpmCalculationWindow;
+    els.settingMaxRecords.value = cfg.maxRecords;
+    
+    togglePreview();
 }
 
 function saveSettings() {
-    appSettings.showPreview = settingPreview.checked;
-    appSettings.autoStopSeconds = parseInt(settingAutoStop.value) || 0;
-    appSettings.bpmCalculationWindow = parseInt(settingBpmWindow.value) || 8;
-    appSettings.maxRecords = parseInt(settingMaxRecords.value) || 0;
-    appSettings.autoSave = settingAutoSave.checked;
-    localStorage.setItem('pulse_settings', JSON.stringify(appSettings));
-    togglePreviewVisibility();
+    cfg.showPreview = els.settingPreview.checked;
+    cfg.autoStopSeconds = parseInt(els.settingAutoStop.value) || 0;
+    cfg.bpmCalculationWindow = parseInt(els.settingBpmWindow.value) || 8;
+    cfg.maxRecords = parseInt(els.settingMaxRecords.value) || 0;
+    cfg.autoSave = els.settingAutoSave.checked;
     
-    // Reset algo beat buffer when settings change
-    algoState.detectedBeats = [];
-    algoState.bpm = 0;
+    localStorage.setItem('pulse_settings', JSON.stringify(cfg));
+    togglePreview();
+    
+    algo.detectedBeats = [];
+    algo.bpm = 0;
 }
 
-function togglePreviewVisibility() {
-    if (appSettings.showPreview) offscreenCanvas.classList.remove('hidden');
-    else offscreenCanvas.classList.add('hidden');
+function togglePreview() {
+    els.preview.classList.toggle('hidden', !cfg.showPreview);
 }
 
-// Resize
+// ============================================================================
+// Canvas Resize
+// ============================================================================
 function resize() {
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
+    els.canvas.width = els.container.clientWidth;
+    els.canvas.height = els.container.clientHeight;
 }
+
 window.addEventListener('resize', resize);
 resize();
 
-// Mode Handling
+// ============================================================================
+// Mode Management
+// ============================================================================
 async function setMode(newMode) {
     const prevMode = state.mode;
     
-    // Safety: Stop loop processing immediately to prevent data race during async save
     if (prevMode === 'camera' || prevMode === 'simulate') {
-        state.mode = 'transition'; 
+        state.mode = 'transition';
     }
     
     if (prevMode === 'camera' && newMode !== 'camera') {
@@ -437,165 +604,160 @@ async function setMode(newMode) {
         releaseWakeLock();
     }
     
-    // Auto-save check when stopping a recording session
     if ((prevMode === 'camera' || prevMode === 'simulate') && newMode === 'idle') {
-        if (appSettings.autoSave && state.history.length > 60) {
+        if (cfg.autoSave && state.history.length > 60) {
             await saveRec();
         }
     }
     
     if (prevMode === 'review' && newMode !== 'review') {
-        reviewData = null; // Clear memory
+        reviewData = null;
     }
 
-    // Clear old state
     state.mode = newMode;
-    state.history = []; 
+    state.history = [];
     state.totalTime = 0;
     state.framesSinceStart = 0;
     state.signalMean = 0;
     state.recentValues = [];
     state.currentGain = 1.0;
-    algoState.bpm = 0;
-    algoState.detectedBeats = [];
-    algoState.lastBeatTime = 0;
-    saturationWarning.classList.add('hidden');
-    torchWarning.classList.add('hidden');
+    algo.bpm = 0;
+    algo.detectedBeats = [];
+    algo.lastBeatTime = 0;
+    
+    els.saturationWarning.classList.add('hidden');
+    els.torchWarning.classList.add('hidden');
 
-    // Reset Session
     if (newMode === 'camera' || newMode === 'simulate') {
-        currentSession.id = Date.now();
-        currentSession.startTime = new Date().toISOString();
+        session.id = Date.now();
+        session.startTime = new Date().toISOString();
     } else {
-        currentSession.id = null;
-        currentSession.startTime = null;
+        session.id = null;
+        session.startTime = null;
     }
 
-    // UI Reset
-    instructionOverlay.classList.add('hidden');
-    saveBtn.disabled = true;
-    saveBtn.innerText = "Save";
-    reviewControls.classList.add('hidden');
-    reviewControls.classList.remove('flex');
-    simControls.classList.add('hidden');
-    measuredBpmDisplay.classList.remove('text-green-500', 'text-purple-500', 'text-amber-500');
-    measuredBpmDisplay.classList.add('text-slate-500');
-    measuredBpmDisplay.innerText = "--";
-    offCtx.clearRect(0,0,30,30); // Clear preview
+    els.instructionOverlay.classList.add('hidden');
+    els.saveBtn.disabled = true;
+    els.saveBtn.innerText = "Save";
+    
+    toggleClasses(els.reviewControls, null, ['flex']);
+    els.reviewControls.classList.add('hidden');
+    els.simControls.classList.add('hidden');
+    
+    toggleClasses(
+        els.bpmDisplay,
+        ['text-slate-500'],
+        ['text-green-500', 'text-purple-500', 'text-amber-500']
+    );
+    
+    els.bpmDisplay.innerText = "--";
+    offCtx.clearRect(0, 0, 30, 30);
+
+    const modeCfg = modeConfig[newMode];
+    if (modeCfg) {
+        els.modeBadge.innerText = modeCfg.badge.text;
+        els.modeBadge.className = modeCfg.badge.class;
+        
+        if (modeCfg.camera) {
+            toggleClasses(els.cameraBtn, modeCfg.camera.bg, modeCfg.camera.rm);
+        }
+        
+        if (modeCfg.simulate) {
+            toggleClasses(els.simulateBtn, modeCfg.simulate.bg, modeCfg.simulate.rm);
+        }
+    }
 
     if (newMode === 'idle') {
-        instructionOverlay.classList.remove('hidden');
-        modeBadge.innerText = "IDLE";
-        modeBadge.className = "text-[10px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-400 font-bold uppercase";
-        cameraToggleBtn.classList.remove('bg-rose-600', 'hover:bg-rose-500');
-        cameraToggleBtn.classList.add('bg-sky-600', 'hover:bg-sky-500');
-        simulateBtn.classList.remove('bg-rose-600', 'hover:bg-rose-500');
-        simulateBtn.classList.add('bg-purple-600', 'hover:bg-purple-500');
+        els.instructionOverlay.classList.remove('hidden');
         releaseWakeLock();
+        
     } else if (newMode === 'camera') {
-        modeBadge.innerText = "CAMERA";
-        modeBadge.className = "text-[10px] px-1.5 py-0.5 rounded bg-sky-900/50 border border-sky-700 text-sky-300 font-bold uppercase";
-        cameraToggleBtn.classList.add('bg-rose-600', 'hover:bg-rose-500'); 
-        cameraToggleBtn.classList.remove('bg-sky-600', 'hover:bg-sky-500');
-        saveBtn.disabled = false;
+        els.saveBtn.disabled = false;
         await startCamera();
         acquireWakeLock();
+        
     } else if (newMode === 'simulate') {
-        modeBadge.innerText = "SIM";
-        modeBadge.className = "text-[10px] px-1.5 py-0.5 rounded bg-purple-900/50 border border-purple-700 text-purple-300 font-bold uppercase";
-        simulateBtn.classList.add('bg-rose-600', 'hover:bg-rose-500'); 
-        simulateBtn.classList.remove('bg-purple-600', 'hover:bg-purple-500');
-        simControls.classList.remove('hidden');
-        saveBtn.disabled = false;
+        els.simControls.classList.remove('hidden');
+        els.saveBtn.disabled = false;
         acquireWakeLock();
+        
     } else if (newMode === 'review') {
-        modeBadge.innerText = "REVIEW";
-        modeBadge.className = "text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 border border-amber-700 text-amber-300 font-bold uppercase";
-        reviewControls.classList.remove('hidden');
-        reviewControls.classList.add('flex');
+        toggleClasses(els.reviewControls, ['flex'], ['hidden']);
         releaseWakeLock();
     }
 }
 
-// Export
+// ============================================================================
+// Export Functions
+// ============================================================================
 function exportAllData() {
     const raw = localStorage.getItem('hr_records');
     if (!raw) return alert("No data");
+    
     const blob = new Blob([raw], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
+    
     a.href = url;
     a.download = `heart_rate_data_${Date.now()}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    
     URL.revokeObjectURL(url);
 }
 
 function exportGraphImage() {
-    draw(state.mode === 'review' ? reviewData : state.history); 
+    draw(state.mode === 'review' ? reviewData : state.history);
+    
     ctx.save();
-    ctx.fillStyle = "#0f172a"; 
+    ctx.fillStyle = "#0f172a";
     ctx.fillRect(0, 0, 140, 60);
-    ctx.fillStyle = '#f59e0b'; 
+    
+    ctx.fillStyle = '#f59e0b';
     ctx.font = 'bold 24px monospace';
     ctx.textAlign = 'left';
-    ctx.fillText(`${measuredBpmDisplay.innerText} BPM`, 10, 30);
-    ctx.fillStyle = '#94a3b8'; 
+    ctx.fillText(`${els.bpmDisplay.innerText} BPM`, 10, 30);
+    
+    ctx.fillStyle = '#94a3b8';
     ctx.font = '10px sans-serif';
     ctx.fillText(new Date().toLocaleDateString(), 10, 45);
     ctx.restore();
 
     const link = document.createElement('a');
     link.download = `ecg_${Date.now()}.png`;
-    link.href = canvas.toDataURL('image/png');
+    link.href = els.canvas.toDataURL('image/png');
     link.click();
-    requestAnimationFrame(() => draw(state.mode === 'review' ? reviewData : state.history)); 
+    
+    requestAnimationFrame(() => draw(state.mode === 'review' ? reviewData : state.history));
 }
 
-// Delete Oldest Logic
-deleteOldestBtn.onclick = () => {
-    try {
-        let recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
-        if (recs.length === 0) return alert("No records to delete");
-        
-        // Remove 10 oldest (from end of array)
-        recs.splice(recs.length - 10, 10);
-        
-        localStorage.setItem('hr_records', JSON.stringify(recs));
-        renderList();
-        alert("Deleted oldest records");
-    } catch(e) { console.error(e); }
-};
-
-// --- Enhanced Camera Logic with Capabilities ---
+// ============================================================================
+// Camera Management
+// ============================================================================
 async function startCamera() {
     try {
         const constraints = {
             audio: false,
             video: {
                 facingMode: 'environment',
-                width: { ideal: 320 }, 
+                width: { ideal: 320 },
                 height: { ideal: 240 },
-                frameRate: { ideal: 60, min: 30 } 
+                frameRate: { ideal: 60, min: 30 }
             }
         };
         
         stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = stream;
+        els.video.srcObject = stream;
         
-        // Wait for metadata but DON'T play yet
-        await new Promise(r => video.onloadedmetadata = r);
+        await new Promise(r => els.video.onloadedmetadata = r);
         
         const track = stream.getVideoTracks()[0];
-        
-        // Apply constraints BEFORE playing to avoid flashless frames
         await applyOptimizedConstraints(track);
+        await els.video.play();
+        
         updateCameraStats(track);
         
-        // NOW start playing
-        video.play();
-
     } catch (err) {
         console.error("Camera Error:", err);
         alert("Camera unavailable or permission denied.");
@@ -605,116 +767,127 @@ async function startCamera() {
 
 async function applyOptimizedConstraints(track) {
     const caps = track.getCapabilities ? track.getCapabilities() : {};
-    
     const advanced = [];
     const mainConstraints = {};
 
-    // A. TORCH
     if (caps.torch) {
         advanced.push({ torch: true });
     }
-
-    // B. FOCUS
+    
     if (caps.focusMode && caps.focusMode.includes('continuous')) {
         mainConstraints.focusMode = 'continuous';
     }
-
-    // C. WHITE BALANCE
+    
     if (caps.whiteBalanceMode && caps.whiteBalanceMode.includes('single-shot')) {
-         mainConstraints.whiteBalanceMode = 'single-shot'; 
+        mainConstraints.whiteBalanceMode = 'single-shot';
     }
-
-    // D. EXPOSURE
+    
     if (caps.exposureCompensation) {
         const minExp = caps.exposureCompensation.min || -2;
         const maxExp = caps.exposureCompensation.max || 2;
         mainConstraints.exposureCompensation = Math.max(minExp, Math.min(maxExp, -1.0));
     }
     
-    // E. ISO
     if (caps.iso && caps.iso.min) {
-        mainConstraints.iso = caps.iso.min; 
+        mainConstraints.iso = caps.iso.min;
     }
-
-    // F. Frame Rate
+    
     if (caps.frameRate && caps.frameRate.max >= 55) {
         mainConstraints.frameRate = { ideal: 60 };
     }
 
-    const finalConstraints = { advanced: advanced, ...mainConstraints };
-    
     try {
-        await track.applyConstraints(finalConstraints);
-        torchWarning.classList.add('hidden');
+        await track.applyConstraints({ advanced, ...mainConstraints });
+        els.torchWarning.classList.add('hidden');
+        
     } catch (e) {
         console.warn('Could not apply advanced constraints:', e);
+        
         if (caps.torch) {
-            try { 
-                await track.applyConstraints({ advanced: [{ torch: true }] }); 
-                torchWarning.classList.add('hidden');
+            try {
+                await track.applyConstraints({ advanced: [{ torch: true }] });
+                els.torchWarning.classList.add('hidden');
             } catch(err) {
                 console.error('Torch unavailable:', err);
-                torchWarning.classList.remove('hidden');
+                els.torchWarning.classList.remove('hidden');
             }
         } else {
-            torchWarning.classList.remove('hidden');
+            els.torchWarning.classList.remove('hidden');
         }
     }
 }
 
 function updateCameraStats(track) {
     const s = track.getSettings();
-    statRes.innerText = `${s.width}x${s.height}`;
-    statFps.innerText = s.frameRate ? s.frameRate.toFixed(1) : '--';
-    statExp.innerText = s.exposureCompensation ? s.exposureCompensation : (s.exposureMode || '--');
-    statIso.innerText = s.iso || '--';
+    
+    els.statRes.innerText = `${s.width}x${s.height}`;
+    els.statFps.innerText = s.frameRate ? s.frameRate.toFixed(1) : '--';
+    els.statExp.innerText = s.exposureCompensation ? 
+        s.exposureCompensation : (s.exposureMode || '--');
+    els.statIso.innerText = s.iso || '--';
 }
 
 function stopCamera() {
-    if (stream) stream.getTracks().forEach(t => {
-        try { t.applyConstraints({ advanced: [{ torch: false }] }); } catch(e){}
-        t.stop();
-    });
-    stream = null;
-    if (video) { video.pause(); video.srcObject = null; }
+    if (stream) {
+        stream.getTracks().forEach(t => {
+            try {
+                t.applyConstraints({ advanced: [{ torch: false }] });
+            } catch(e) {
+                console.warn('Failed to turn off torch', e);
+            }
+            t.stop();
+        });
+        stream = null;
+    }
+    
+    if (els.video) {
+        els.video.pause();
+        els.video.srcObject = null;
+    }
 }
 
-// Signal Proc
+// ============================================================================
+// Signal Processing
+// ============================================================================
 function normalizeSignal(val) {
     state.recentValues.push(val);
-    if (state.recentValues.length > 120) state.recentValues.shift();
-    let min = -0.01, max = 0.01; 
+    
+    if (state.recentValues.length > 120) {
+        state.recentValues.shift();
+    }
+    
+    let min = -0.01;
+    let max = 0.01;
+    
     for (let v of state.recentValues) {
         if (v < min) min = v;
         if (v > max) max = v;
     }
-    const targetGain = 0.7 / ((max - min) || 0.1); 
+    
+    const targetGain = 0.7 / ((max - min) || 0.1);
     state.currentGain = (state.currentGain * 0.95) + (targetGain * 0.05);
+    
     let norm = val * state.currentGain;
-    debugGain.innerText = state.currentGain.toFixed(1);
+    els.debugGain.innerText = state.currentGain.toFixed(1);
+    
     return Math.max(-0.6, Math.min(0.6, norm));
 }
 
 function processFrame() {
-    offCtx.drawImage(video, 0, 0, 30, 30);
-
+    offCtx.drawImage(els.video, 0, 0, 30, 30);
     const data = offCtx.getImageData(0, 0, 30, 30).data;
+    
     let sum = 0;
     let count = 0;
     
-    // Spatial Undersampling (Sample every 16th pixel)
     for (let i = 0; i < data.length; i += 16) {
-        sum += data[i + 1]; // Green channel
+        sum += data[i + 1];
         count++;
     }
     
     const avg = sum / count;
     
-    if (avg > 250) {
-        saturationWarning.classList.remove('hidden');
-    } else {
-        saturationWarning.classList.add('hidden');
-    }
+    els.saturationWarning.classList.toggle('hidden', avg <= 250);
     
     if (state.framesSinceStart < 30) {
         state.signalMean = avg;
@@ -723,118 +896,161 @@ function processFrame() {
     }
     
     state.signalMean = (state.signalMean * 0.95) + (avg * 0.05);
-    return normalizeSignal(state.signalMean - avg); 
+    
+    return normalizeSignal(state.signalMean - avg);
 }
 
 function generateSimulation(dt) {
     const dur = 60 / state.simBpm;
     state.simPhase += dt;
-    if (state.simPhase > dur) state.simPhase -= dur;
+    
+    if (state.simPhase > dur) {
+        state.simPhase -= dur;
+    }
+    
     const t = state.simPhase / dur;
-    const gaussian = (a, c, w) => a * Math.exp(-Math.pow(t - c, 2) / (2 * w * w));
-    let s = gaussian(1.0, 0.2, 0.08) + gaussian(0.3, 0.5, 0.12) + Math.sin(state.totalTime)*0.1;
+    
+    const gaussian = (a, c, w) => {
+        return a * Math.exp(-Math.pow(t - c, 2) / (2 * w * w));
+    };
+    
+    let s = gaussian(1.0, 0.2, 0.08) + 
+            gaussian(0.3, 0.5, 0.12) + 
+            Math.sin(state.totalTime) * 0.1;
+    
     return normalizeSignal(s * 0.05);
 }
 
 function processAlgo(val, time) {
-    algoState.runningMax *= algoState.decayRate;
-    algoState.threshold = Math.max(algoState.runningMax * 0.5, 0.05);
-    if (val > algoState.runningMax) algoState.runningMax = val;
+    algo.runningMax *= algo.decayRate;
+    algo.threshold = Math.max(algo.runningMax * 0.5, 0.05);
+    
+    if (val > algo.runningMax) {
+        algo.runningMax = val;
+    }
+    
     let isBeat = false;
     
-    if (val > algoState.threshold && (time - algoState.lastBeatTime) > algoState.refractoryPeriod) {
-        if (algoState.runningMax > 0.15) {
-            algoState.lastBeatTime = time;
+    if (val > algo.threshold && 
+        (time - algo.lastBeatTime) > algo.refractoryPeriod) {
+        
+        if (algo.runningMax > 0.15) {
+            algo.lastBeatTime = time;
             isBeat = true;
-            beatIndicator.classList.add('bg-red-500', 'scale-150');
-            setTimeout(() => beatIndicator.classList.remove('bg-red-500', 'scale-150'), 100);
             
-            algoState.detectedBeats.push(time);
+            toggleClasses(els.beatIndicator, ['bg-red-500', 'scale-150']);
+            setTimeout(() => {
+                toggleClasses(els.beatIndicator, null, ['bg-red-500', 'scale-150']);
+            }, 100);
             
-            const limit = appSettings.bpmCalculationWindow || 8;
-            while(algoState.detectedBeats.length > limit) {
-                 algoState.detectedBeats.shift();
+            algo.detectedBeats.push(time);
+            
+            const limit = cfg.bpmCalculationWindow;
+            while(algo.detectedBeats.length > limit) {
+                algo.detectedBeats.shift();
             }
 
-            if(algoState.detectedBeats.length >= 2) {
+            if (algo.detectedBeats.length >= 2) {
                 let sum = 0;
-                for(let i=1; i<algoState.detectedBeats.length; i++) sum += (algoState.detectedBeats[i]-algoState.detectedBeats[i-1]);
-                let bpm = 60000 / (sum/(algoState.detectedBeats.length-1));
-                algoState.bpm = algoState.bpm === 0 ? bpm : (algoState.bpm * 0.7 + bpm * 0.3);
-                algoState.refractoryPeriod = Math.max(250, Math.min((60000/algoState.bpm)*0.6, 1000));
                 
-                measuredBpmDisplay.innerText = Math.round(algoState.bpm);
-                measuredBpmDisplay.className = "text-4xl font-mono font-bold tracking-tighter " + (state.mode === 'camera' ? "text-green-500" : "text-purple-500");
+                for (let i = 1; i < algo.detectedBeats.length; i++) {
+                    sum += (algo.detectedBeats[i] - algo.detectedBeats[i-1]);
+                }
+                
+                let bpm = 60000 / (sum / (algo.detectedBeats.length - 1));
+                algo.bpm = algo.bpm === 0 ? bpm : (algo.bpm * 0.7 + bpm * 0.3);
+                algo.refractoryPeriod = Math.max(250, Math.min((60000 / algo.bpm) * 0.6, 1000));
+                
+                els.bpmDisplay.innerText = Math.round(algo.bpm);
+                
+                const colorClass = state.mode === 'camera' ? 
+                    "text-green-500" : "text-purple-500";
+                    
+                els.bpmDisplay.className = 
+                    "text-4xl font-mono font-bold tracking-tighter " + colorClass;
             }
         }
     }
-    return { isBeat, threshold: algoState.threshold };
+    
+    return { isBeat, threshold: algo.threshold };
 }
 
-function updateHistory(val, thresh, beat, bpm, dt) {
-    state.timeSinceLastMinorGrid += dt;
-    state.timeSinceLastMinorGrid %= 0.2;
+function updateHistory(val, thresh, beat, bpm) {
+    state.history.push({
+        val,
+        threshold: thresh,
+        beat,
+        bpm
+    });
     
-    state.history.push({ val, threshold: thresh, beat, bpm });
-    
-    // 10,800 frames approx 3 minutes at 60fps
-    if (state.history.length > 10800) state.history.shift();
+    if (state.history.length > 10800) {
+        state.history.shift();
+    }
 }
 
-// Storage
+// ============================================================================
+// Storage Management
+// ============================================================================
 async function saveRec() {
-    // FIX: Snapshot critical state variables BEFORE yielding to any async operations (like storage estimate)
+    const modeAtStart = state.mode;
     const historySnapshot = [...state.history];
-    const sessionIdSnapshot = currentSession.id;
-    const startTimeSnapshot = currentSession.startTime;
-    const bpmSnapshot = algoState.bpm;
+    const sessionIdSnapshot = session.id;
+    const startTimeSnapshot = session.startTime;
+    const bpmSnapshot = algo.bpm;
     const totalTimeSnapshot = state.totalTime;
 
-    if(historySnapshot.length < 60) {
-        if(!appSettings.autoSave) alert("Too short to save");
+    if (modeAtStart !== 'camera' && 
+        modeAtStart !== 'simulate' && 
+        modeAtStart !== 'idle') {
+        console.warn('Save aborted: invalid mode');
+        return;
+    }
+
+    if (historySnapshot.length < 60) {
+        if (!cfg.autoSave) {
+            alert("Too short to save");
+        }
         return;
     }
 
     if (navigator.storage && navigator.storage.estimate) {
         try {
             const estimate = await navigator.storage.estimate();
+            
             if (estimate.quota > 0) {
                 const usageRatio = estimate.usage / estimate.quota;
-                if (usageRatio > 0.95) return alert("Storage full. Delete old recordings to continue.");
-                if (usageRatio > 0.85) alert(`Storage almost full (${(estimate.usage/1024/1024).toFixed(1)}MB used). Consider deleting old recordings.`);
+                
+                if (usageRatio > 0.95) {
+                    return alert("Storage full. Delete old recordings to continue.");
+                }
+                
+                if (usageRatio > 0.85) {
+                    alert(`Storage almost full (${(estimate.usage/1024/1024).toFixed(1)}MB used). Consider deleting old recordings.`);
+                }
             }
-        } catch(e) { console.warn("Quota check failed", e); }
+        } catch(e) {
+            console.warn("Quota check failed", e);
+        }
     }
     
     try {
-        let recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
+        let recs = JSON.parse(localStorage.getItem('hr_records') || '[]');
         
-        if (appSettings.maxRecords > 0 && recs.length >= appSettings.maxRecords) {
-            recs.splice(appSettings.maxRecords - 1); // Make room
+        if (cfg.maxRecords > 0 && recs.length >= cfg.maxRecords) {
+            recs.splice(cfg.maxRecords - 1);
         }
 
         const existingIndex = recs.findIndex(r => r.id === sessionIdSnapshot);
         
-        // Columnar pack history using SNAPSHOT
-        const samples = [];
-        const beatIndices = [];
-        const bpms = [];
-        
-        historySnapshot.forEach((h, i) => {
-            samples.push(h.val);           
-            if (h.beat) beatIndices.push(i);
-            bpms.push(h.bpm);
-        });
+        const samples = historySnapshot.map(h => h.val);
 
-        const recordData = { 
-            id: sessionIdSnapshot || Date.now(), 
-            v: 2, 
-            timestamp: startTimeSnapshot || new Date().toISOString(), 
-            avgBpm: Math.round(bpmSnapshot)||'--', 
+        const recordData = {
+            id: sessionIdSnapshot || Date.now(),
+            v: 3,
+            timestamp: startTimeSnapshot || new Date().toISOString(),
+            avgBpm: Math.round(bpmSnapshot) || '--',
             duration: totalTimeSnapshot,
-            samples: samples,
-            beatIndices: beatIndices,
-            bpms: bpms
+            samples
         };
 
         if (existingIndex >= 0) {
@@ -845,22 +1061,32 @@ async function saveRec() {
 
         localStorage.setItem('hr_records', JSON.stringify(recs));
         renderList();
-        saveBtn.innerText = "Saved";
-        setTimeout(() => saveBtn.innerText = "Save", 1500);
-    } catch(e) { 
+        
+        els.saveBtn.innerText = "Saved";
+        setTimeout(() => els.saveBtn.innerText = "Save", 1500);
+        
+    } catch(e) {
         console.error(e);
+        
         if (e.name === 'QuotaExceededError') {
             alert("Storage full. Please delete old recordings.");
-        } else if(!appSettings.autoSave) {
-            alert("Save failed"); 
+        } else if (!cfg.autoSave) {
+            alert("Save failed");
         }
     }
 }
 
 function renderList() {
-    let recs = JSON.parse(localStorage.getItem('hr_records')||'[]');
+    let recs = JSON.parse(localStorage.getItem('hr_records') || '[]');
     
-    const validRecs = recs.filter(r => r.v === 2 && Array.isArray(r.samples));
+    const validRecs = recs.filter(r => {
+        if (r.v === 2) {
+            console.log('Found v2 format recording (ignored):', r.id, r.timestamp);
+            return false;
+        }
+        return r.v === 3 && Array.isArray(r.samples);
+    });
+    
     if (validRecs.length !== recs.length) {
         recs = validRecs;
         localStorage.setItem('hr_records', JSON.stringify(recs));
@@ -868,22 +1094,38 @@ function renderList() {
 
     const jsonStr = JSON.stringify(recs);
     const sizeMB = (new Blob([jsonStr]).size / 1024 / 1024).toFixed(2);
-    storageInfo.innerText = `${sizeMB}MB / ~5MB`;
-    if(sizeMB > 4.5) storageInfo.className = "text-[9px] font-mono text-rose-500 font-bold";
-    else if(sizeMB > 3.5) storageInfo.className = "text-[9px] font-mono text-amber-500 font-bold";
-    else storageInfo.className = "text-[9px] font-mono text-slate-600";
+    const sizeNum = parseFloat(sizeMB);
     
-    savedListContainer.innerHTML = '';
-    if(!recs.length) return savedListContainer.appendChild(emptyState);
+    els.storageInfo.innerText = `${sizeMB}MB / ~5MB`;
+    
+    if (sizeNum > 4.5) {
+        els.storageInfo.className = "text-[9px] font-mono text-rose-500 font-bold";
+    } else if (sizeNum > 3.5) {
+        els.storageInfo.className = "text-[9px] font-mono text-amber-500 font-bold";
+    } else {
+        els.storageInfo.className = "text-[9px] font-mono text-slate-600";
+    }
+    
+    els.savedList.innerHTML = '';
+    
+    if (!recs.length) {
+        return els.savedList.appendChild(els.emptyState);
+    }
     
     recs.forEach(r => {
         const d = new Date(r.timestamp);
         const div = document.createElement('div');
+        
         div.className = "bg-slate-800/80 p-3 rounded-lg border border-slate-700 hover:border-sky-500 cursor-pointer flex justify-between items-center transition-all active:scale-[0.98]";
+        
         div.innerHTML = `
             <div>
-                <div class="font-bold text-sky-400 text-xs">${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
-                <div class="text-[10px] text-slate-500">${d.toLocaleDateString()} • ${r.duration.toFixed(1)}s</div>
+                <div class="font-bold text-sky-400 text-xs">
+                    ${d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                </div>
+                <div class="text-[10px] text-slate-500">
+                    ${d.toLocaleDateString()} • ${r.duration.toFixed(1)}s
+                </div>
             </div>
             <div class="flex items-center gap-3">
                 <div class="text-right">
@@ -891,250 +1133,327 @@ function renderList() {
                     <div class="font-bold text-slate-200 text-sm">${r.avgBpm}</div>
                 </div>
                 <button class="del p-2 text-slate-500 hover:text-rose-400" data-id="${r.id}">✕</button>
-            </div>`;
+            </div>
+        `;
         
         div.onclick = (e) => {
-            if(e.target.classList.contains('del')) {
-                localStorage.setItem('hr_records', JSON.stringify(recs.filter(x=>x.id !== r.id)));
+            if (e.target.classList.contains('del')) {
+                localStorage.setItem(
+                    'hr_records',
+                    JSON.stringify(recs.filter(x => x.id !== r.id))
+                );
                 renderList();
             } else {
                 setMode('review');
                 
-                // Initialize simulation state for threshold recalculation
-                let runningMax = 0.1;
-                const decayRate = algoState.decayRate;
+                const thresholds = calculateThreshold(r.samples);
+                const beatIndices = detectBeats(r.samples, thresholds);
+                const calculatedBpm = calculateBPM(
+                    beatIndices,
+                    r.duration,
+                    cfg.bpmCalculationWindow
+                );
 
-                reviewData = r.samples.map((val, i) => {
-                    // Re-run the threshold logic from processAlgo
-                    runningMax *= decayRate;
-                    const computedThreshold = Math.max(runningMax * 0.5, 0.05);
-                    if (val > runningMax) runningMax = val;
-                    
-                    return {
-                        val: val,
-                        threshold: computedThreshold,
-                        beat: r.beatIndices.includes(i),
-                        bpm: (r.bpms && r.bpms[i]) ? r.bpms[i] : r.avgBpm
-                    };
-                });
+                reviewData = r.samples.map((val, i) => ({
+                    val,
+                    threshold: thresholds[i].threshold,
+                    beat: beatIndices.includes(i),
+                    bpm: calculatedBpm || r.avgBpm
+                }));
                 
-                // Attach duration for grid calculation
                 reviewData.duration = r.duration;
-
-                historySlider.min = 0;
-                historySlider.max = r.samples.length;
-                historySlider.value = r.samples.length;
                 
-                // Initialize reviewOffset to match the slider (end of recording)
+                els.historySlider.min = 0;
+                els.historySlider.max = r.samples.length;
+                els.historySlider.value = r.samples.length;
+                
                 state.reviewOffset = r.samples.length;
                 
-                measuredBpmDisplay.innerText = r.avgBpm;
-                measuredBpmDisplay.className = "text-4xl font-mono font-bold text-amber-500 tracking-tighter";
+                els.bpmDisplay.innerText = calculatedBpm || r.avgBpm;
+                els.bpmDisplay.className = 
+                    "text-4xl font-mono font-bold text-amber-500 tracking-tighter";
                 
                 draw(reviewData);
             }
         };
-        savedListContainer.appendChild(div);
+        
+        els.savedList.appendChild(div);
     });
 }
 
-// Loop
-function loop(t) {
-    if(!state.lastTime) state.lastTime = t;
-    const dt = (t - state.lastTime)/1000;
+// ============================================================================
+// Animation Loop
+// ============================================================================
+async function loop(t) {
+    if (!state.lastTime) state.lastTime = t;
+    
+    const dt = (t - state.lastTime) / 1000;
     state.lastTime = t;
 
-    if(state.mode === 'camera' || state.mode === 'simulate') {
+    if (state.mode === 'camera' || state.mode === 'simulate') {
         state.totalTime += dt;
         
-        if (appSettings.autoStopSeconds > 0 && state.totalTime >= appSettings.autoStopSeconds) {
-            setMode('idle');
+        if (cfg.autoStopSeconds > 0 && state.totalTime >= cfg.autoStopSeconds) {
+            await setMode('idle');
         } else {
-            let s = state.mode === 'camera' ? processFrame() : generateSimulation(dt);
+            let s = state.mode === 'camera' ? 
+                processFrame() : generateSimulation(dt);
+                
             const res = processAlgo(s, t);
-            updateHistory(s, res.threshold, res.isBeat, Math.round(algoState.bpm), dt);
+            updateHistory(s, res.threshold, res.isBeat, Math.round(algo.bpm));
         }
     }
     
-    if (state.mode === 'review') {
-        draw(reviewData);
-    } else {
-        draw(state.history);
-    }
+    draw(state.mode === 'review' ? reviewData : state.history);
     
     animationFrameId = requestAnimationFrame(loop);
 }
 
+// ============================================================================
+// Drawing Function
+// ============================================================================
 function draw(dataSource) {
     const data = dataSource || [];
     
-    ctx.fillStyle = '#0f172a'; 
-    ctx.fillRect(0,0,canvas.width,canvas.height); 
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, els.canvas.width, els.canvas.height);
     
     if (!data.length) return;
     
     let end = state.mode === 'review' ? state.reviewOffset : data.length;
-    let start = Math.max(0, end - canvas.width);
+    let start = Math.max(0, end - els.canvas.width);
     
-    // Update review text
-    if(state.mode === 'review') {
-        // Dynamic BPM Calculation
+    if (state.mode === 'review') {
         const totalDur = data.duration || 0;
         const totalSamples = data.length || 1;
-        const avgDt = (totalDur && totalSamples) ? (totalDur / totalSamples) : (1/60);
+        const avgDt = (totalDur && totalSamples) ? 
+            (totalDur / totalSamples) : (1 / 60);
         
         let displayBpm = '--';
-        const win = appSettings.bpmCalculationWindow || 8;
+        const win = cfg.bpmCalculationWindow;
         const recentBeats = [];
         
-        // Find last 'win' beats before 'end'
-        for(let i = end-1; i >= 0 && recentBeats.length < win; i--) {
-            if(data[i].beat) recentBeats.push(i);
+        for (let i = end - 1; i >= 0 && recentBeats.length < win; i--) {
+            if (data[i].beat) recentBeats.push(i);
         }
         
-        if(recentBeats.length >= 2) {
-            // Indices are newest to oldest
+        if (recentBeats.length >= 2) {
             const newest = recentBeats[0];
-            const oldest = recentBeats[recentBeats.length-1];
+            const oldest = recentBeats[recentBeats.length - 1];
             const diffSecs = (newest - oldest) * avgDt;
-            if(diffSecs > 0) {
+            
+            if (diffSecs > 0) {
                 const bpm = 60 * (recentBeats.length - 1) / diffSecs;
                 displayBpm = Math.round(bpm);
             }
-        } else if (data[end-1] && data[end-1].bpm) {
-            // Fallback to stored BPM if available and calculation fails (e.g. very start)
-            displayBpm = data[end-1].bpm;
+        } else if (data[end - 1] && data[end - 1].bpm) {
+            displayBpm = data[end - 1].bpm;
         }
 
-        measuredBpmDisplay.innerText = displayBpm;
-        reviewTimeDisplay.innerText = `-${((data.length-end) * avgDt).toFixed(1)}s`;
+        els.bpmDisplay.innerText = displayBpm;
+        els.reviewTimeDisplay.innerText = 
+            `-${((data.length - end) * avgDt).toFixed(1)}s`;
     }
 
     const viewData = data.slice(start, end);
-    if(!viewData.length) return;
+    if (!viewData.length) return;
 
-    const cy = canvas.height/2;
-    const sy = canvas.height/2.2;
-    const my = v => cy - v*sy;
+    const cy = els.canvas.height / 2;
+    const sy = els.canvas.height / 2.2;
+    const my = v => cy - v * sy;
 
-    const totalDuration = state.mode === 'review' ? (data.duration || state.totalTime) : state.totalTime;
-    const safeDur = totalDuration || 1; 
+    const totalDuration = state.mode === 'review' ? 
+        (data.duration || state.totalTime) : state.totalTime;
+    const safeDur = totalDuration || 1;
 
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
     ctx.font = "9px monospace";
 
-    for(let i=0; i<viewData.length; i++) {
-        // Calculate relative time of this pixel in the total recording
+    for (let i = 0; i < viewData.length; i++) {
         const absIndex = start + i;
         const timeAtPixel = (absIndex / Math.max(data.length, 1)) * safeDur;
-        
-        // Check if we crossed a grid line (using floor logic)
         const prevIndex = start + i - 1;
         const prevTimeAtPixel = (prevIndex / Math.max(data.length, 1)) * safeDur;
         
-        // Minor grid (0.2s)
         if (Math.floor(timeAtPixel * 5) !== Math.floor(prevTimeAtPixel * 5)) {
             ctx.beginPath();
             ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-            ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i, els.canvas.height);
+            ctx.stroke();
         }
 
-        // Major grid (1.0s)
         if (Math.floor(timeAtPixel) !== Math.floor(prevTimeAtPixel)) {
             ctx.beginPath();
             ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-            ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i, els.canvas.height);
+            ctx.stroke();
             
             ctx.fillStyle = 'rgba(255,255,255,0.3)';
-            ctx.fillText(Math.floor(timeAtPixel) + 's', i, canvas.height-2);
+            ctx.fillText(Math.floor(timeAtPixel) + 's', i, els.canvas.height - 2);
         }
     }
 
-    // Threshold
     ctx.beginPath();
     ctx.strokeStyle = 'rgba(255,200,0,0.3)';
-    ctx.setLineDash([4,4]);
-    viewData.forEach((d,i) => i===0?ctx.moveTo(i,my(d.threshold)):ctx.lineTo(i,my(d.threshold)));
-    ctx.stroke(); ctx.setLineDash([]);
+    ctx.setLineDash([4, 4]);
+    
+    viewData.forEach((d, i) => {
+        if (i === 0) {
+            ctx.moveTo(i, my(d.threshold));
+        } else {
+            ctx.lineTo(i, my(d.threshold));
+        }
+    });
+    
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-    // Signal
-    const color = state.mode==='simulate'?'#a855f7':(state.mode==='review'?'#f59e0b':'#ef4444');
+    const color = state.mode === 'simulate' ? '#a855f7' :
+                  (state.mode === 'review' ? '#f59e0b' : '#ef4444');
+    
     ctx.beginPath();
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
-    viewData.forEach((d,i) => i===0?ctx.moveTo(i,my(d.val)):ctx.lineTo(i,my(d.val)));
+    
+    viewData.forEach((d, i) => {
+        if (i === 0) {
+            ctx.moveTo(i, my(d.val));
+        } else {
+            ctx.lineTo(i, my(d.val));
+        }
+    });
+    
     ctx.stroke();
 
-    // Fill
-    ctx.lineTo(viewData.length-1, canvas.height);
-    ctx.lineTo(0, canvas.height);
+    ctx.lineTo(viewData.length - 1, els.canvas.height);
+    ctx.lineTo(0, els.canvas.height);
     ctx.fillStyle = color + "20";
     ctx.fill();
 
-    // Beats
     ctx.fillStyle = "#fff";
-    viewData.forEach((d,i) => {
-        if(d.beat) { ctx.beginPath(); ctx.arc(i, my(d.val), 3, 0, Math.PI*2); ctx.fill(); }
+    
+    viewData.forEach((d, i) => {
+        if (d.beat) {
+            ctx.beginPath();
+            ctx.arc(i, my(d.val), 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
     });
 }
 
-// Modal Logic
+// ============================================================================
+// Modal Functions
+// ============================================================================
 function openSettings() {
-    settingsModal.classList.remove('hidden');
+    els.settingsModal.classList.remove('hidden');
+    
     setTimeout(() => {
-        settingsContent.classList.remove('scale-95', 'opacity-0');
-        settingsContent.classList.add('scale-100', 'opacity-100');
+        toggleClasses(
+            els.settingsContent,
+            ['scale-100', 'opacity-100'],
+            ['scale-95', 'opacity-0']
+        );
     }, 10);
 }
 
 function closeSettings() {
-    saveSettings(); 
-    settingsContent.classList.remove('scale-100', 'opacity-100');
-    settingsContent.classList.add('scale-95', 'opacity-0');
-    setTimeout(() => settingsModal.classList.add('hidden'), 200);
+    saveSettings();
+    
+    toggleClasses(
+        els.settingsContent,
+        ['scale-95', 'opacity-0'],
+        ['scale-100', 'opacity-100']
+    );
+    
+    setTimeout(() => els.settingsModal.classList.add('hidden'), 200);
 }
 
-// Events
-historySlider.addEventListener('input', e => { state.reviewOffset = parseInt(e.target.value); });
-bpmSlider.addEventListener('input', e => { state.simBpm = parseInt(e.target.value); targetBpmDisplay.innerText = state.simBpm; });
-cameraToggleBtn.onclick = () => setMode(state.mode==='camera'?'idle':'camera');
-simulateBtn.onclick = () => setMode(state.mode==='simulate'?'idle':'simulate');
-saveBtn.onclick = saveRec;
-backToLiveBtn.onclick = () => setMode('idle');
-exportJsonBtn.onclick = exportAllData;
-exportImgBtn.onclick = exportGraphImage;
+// ============================================================================
+// Event Listeners
+// ============================================================================
+els.historySlider.addEventListener('input', e => {
+    state.reviewOffset = parseInt(e.target.value);
+});
 
-// Settings Events
-settingsBtn.onclick = openSettings;
-closeSettingsBtn.onclick = closeSettings;
-settingsModal.onclick = (e) => { if(e.target === settingsModal) closeSettings(); };
+els.bpmSlider.addEventListener('input', e => {
+    state.simBpm = parseInt(e.target.value);
+    els.targetBpmValue.innerText = state.simBpm;
+});
+
+els.cameraBtn.onclick = () => {
+    setMode(state.mode === 'camera' ? 'idle' : 'camera');
+};
+
+els.simulateBtn.onclick = () => {
+    setMode(state.mode === 'simulate' ? 'idle' : 'simulate');
+};
+
+els.saveBtn.onclick = saveRec;
+els.backToLiveBtn.onclick = () => setMode('idle');
+els.exportJsonBtn.onclick = exportAllData;
+els.exportImgBtn.onclick = exportGraphImage;
+els.settingsBtn.onclick = openSettings;
+els.closeSettingsBtn.onclick = closeSettings;
+
+els.settingsModal.onclick = (e) => {
+    if (e.target === els.settingsModal) {
+        closeSettings();
+    }
+};
+
+els.deleteOldestBtn.onclick = () => {
+    try {
+        let recs = JSON.parse(localStorage.getItem('hr_records') || '[]');
+        
+        if (recs.length === 0) {
+            return alert("No records to delete");
+        }
+        
+        recs.splice(recs.length - 10, 10);
+        localStorage.setItem('hr_records', JSON.stringify(recs));
+        renderList();
+        alert("Deleted oldest records");
+        
+    } catch(e) {
+        console.error(e);
+    }
+};
 
 document.addEventListener('visibilitychange', () => {
-    if(document.hidden) {
+    if (document.hidden) {
         cancelAnimationFrame(animationFrameId);
-        if(state.mode === 'camera') {
+        
+        if (state.mode === 'camera') {
             stopCamera();
             releaseWakeLock();
             
-            // Pause but keep data
             state.mode = 'idle';
-            modeBadge.innerText = "PAUSED";
-            modeBadge.className = "text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 border border-amber-700 text-amber-300 font-bold uppercase";
+            els.modeBadge.innerText = "PAUSED";
+            els.modeBadge.className = 
+                "text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 border border-amber-700 text-amber-300 font-bold uppercase";
             
-            saveBtn.disabled = false;
-            saveBtn.innerText = "Save Partial";
+            els.saveBtn.disabled = false;
+            els.saveBtn.innerText = "Save Partial";
             
-            cameraToggleBtn.classList.remove('bg-rose-600', 'hover:bg-rose-500');
-            cameraToggleBtn.classList.add('bg-sky-600', 'hover:bg-sky-500');
+            toggleClasses(
+                els.cameraBtn,
+                ['bg-sky-600', 'hover:bg-sky-500'],
+                ['bg-rose-600', 'hover:bg-rose-500']
+            );
         }
     } else {
         loop(performance.now());
     }
 });
+
 window.onpagehide = stopCamera;
 
-// Init
+// ============================================================================
+// Initialization
+// ============================================================================
 loadSettings();
 renderList();
 loop(performance.now());
