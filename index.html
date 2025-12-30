@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Pulse Monitor v2.3</title>
+    <title>Pulse Monitor v2.4</title>
     
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -270,7 +270,7 @@
             </div>
 
             <div class="mt-4 text-center">
-                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.3</span>
+                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.4</span>
             </div>
         </div>
     </div>
@@ -504,7 +504,7 @@ function calculateThreshold(samples) {
     return results;
 }
 
-function detectBeats(samples, thresholds) {
+function detectBeats(samples, thresholds, timestamps = null) {
     const beatIndices = [];
     let lastBeatIndex = -1000;
     const minGap = 15;
@@ -523,18 +523,19 @@ function detectBeats(samples, thresholds) {
     return beatIndices;
 }
 
-function calculateBPM(beatIndices, totalDuration, windowSize = 8) {
-    if (beatIndices.length < 2) return null;
+function calculateBPM(beatIndices, samples, timestamps, windowSize = 8) {
+    if (beatIndices.length < 2 || !timestamps) return null;
     
     const recent = beatIndices.slice(-windowSize);
     if (recent.length < 2) return null;
     
-    const totalSamples = beatIndices[beatIndices.length - 1] + 1;
-    const avgDt = totalDuration / totalSamples;
+    const firstTime = timestamps[recent[0]];
+    const lastTime = timestamps[recent[recent.length - 1]];
+    const timeSpan = lastTime - firstTime;
     
-    const timeSpan = (recent[recent.length - 1] - recent[0]) * avgDt;
+    if (timeSpan <= 0) return null;
+    
     const bpm = 60 * (recent.length - 1) / timeSpan;
-    
     return Math.round(bpm);
 }
 
@@ -595,6 +596,14 @@ resize();
 async function setMode(newMode) {
     const prevMode = state.mode;
     
+    // AUTO-SAVE CHECK FIRST - before any mode changes
+    if ((prevMode === 'camera' || prevMode === 'simulate') && newMode === 'idle') {
+        if (cfg.autoSave && state.history.length > 60) {
+            await saveRec();
+        }
+    }
+    
+    // Now transition mode
     if (prevMode === 'camera' || prevMode === 'simulate') {
         state.mode = 'transition';
     }
@@ -602,12 +611,6 @@ async function setMode(newMode) {
     if (prevMode === 'camera' && newMode !== 'camera') {
         stopCamera();
         releaseWakeLock();
-    }
-    
-    if ((prevMode === 'camera' || prevMode === 'simulate') && newMode === 'idle') {
-        if (cfg.autoSave && state.history.length > 60) {
-            await saveRec();
-        }
     }
     
     if (prevMode === 'review' && newMode !== 'review') {
@@ -975,8 +978,9 @@ function processAlgo(val, time) {
     return { isBeat, threshold: algo.threshold };
 }
 
-function updateHistory(val, thresh, beat, bpm) {
+function updateHistory(time, val, thresh, beat, bpm) {
     state.history.push({
+        time,
         val,
         threshold: thresh,
         beat,
@@ -992,19 +996,11 @@ function updateHistory(val, thresh, beat, bpm) {
 // Storage Management
 // ============================================================================
 async function saveRec() {
-    const modeAtStart = state.mode;
     const historySnapshot = [...state.history];
     const sessionIdSnapshot = session.id;
     const startTimeSnapshot = session.startTime;
     const bpmSnapshot = algo.bpm;
     const totalTimeSnapshot = state.totalTime;
-
-    if (modeAtStart !== 'camera' && 
-        modeAtStart !== 'simulate' && 
-        modeAtStart !== 'idle') {
-        console.warn('Save aborted: invalid mode');
-        return;
-    }
 
     if (historySnapshot.length < 60) {
         if (!cfg.autoSave) {
@@ -1042,11 +1038,15 @@ async function saveRec() {
 
         const existingIndex = recs.findIndex(r => r.id === sessionIdSnapshot);
         
-        const samples = historySnapshot.map(h => h.val);
+        // Store samples with timestamps (v4 format)
+        const samples = historySnapshot.map(h => ({
+            t: h.time,
+            v: h.val
+        }));
 
         const recordData = {
             id: sessionIdSnapshot || Date.now(),
-            v: 3,
+            v: 4,  // New version with timestamps
             timestamp: startTimeSnapshot || new Date().toISOString(),
             avgBpm: Math.round(bpmSnapshot) || '--',
             duration: totalTimeSnapshot,
@@ -1080,11 +1080,12 @@ function renderList() {
     let recs = JSON.parse(localStorage.getItem('hr_records') || '[]');
     
     const validRecs = recs.filter(r => {
-        if (r.v === 2) {
-            console.log('Found v2 format recording (ignored):', r.id, r.timestamp);
-            return false;
+        // Only accept v4 format (with timestamps)
+        if (r.v === 4 && Array.isArray(r.samples)) {
+            return true;
         }
-        return r.v === 3 && Array.isArray(r.samples);
+        console.log('Ignoring old format recording:', r.id, r.timestamp, 'version:', r.v);
+        return false;
     });
     
     if (validRecs.length !== recs.length) {
@@ -1146,16 +1147,21 @@ function renderList() {
             } else {
                 setMode('review');
                 
-                const thresholds = calculateThreshold(r.samples);
-                const beatIndices = detectBeats(r.samples, thresholds);
+                const values = r.samples.map(s => s.v);
+                const timestamps = r.samples.map(s => s.t);
+                
+                const thresholds = calculateThreshold(values);
+                const beatIndices = detectBeats(values, thresholds);
                 const calculatedBpm = calculateBPM(
                     beatIndices,
-                    r.duration,
+                    values,
+                    timestamps,
                     cfg.bpmCalculationWindow
                 );
 
-                reviewData = r.samples.map((val, i) => ({
-                    val,
+                reviewData = r.samples.map((sample, i) => ({
+                    time: sample.t,
+                    val: sample.v,
                     threshold: thresholds[i].threshold,
                     beat: beatIndices.includes(i),
                     bpm: calculatedBpm || r.avgBpm
@@ -1200,7 +1206,7 @@ async function loop(t) {
                 processFrame() : generateSimulation(dt);
                 
             const res = processAlgo(s, t);
-            updateHistory(s, res.threshold, res.isBeat, Math.round(algo.bpm));
+            updateHistory(state.totalTime, s, res.threshold, res.isBeat, Math.round(algo.bpm));
         }
     }
     
@@ -1224,35 +1230,29 @@ function draw(dataSource) {
     let start = Math.max(0, end - els.canvas.width);
     
     if (state.mode === 'review') {
-        const totalDur = data.duration || 0;
-        const totalSamples = data.length || 1;
-        const avgDt = (totalDur && totalSamples) ? 
-            (totalDur / totalSamples) : (1 / 60);
-        
-        let displayBpm = '--';
-        const win = cfg.bpmCalculationWindow;
-        const recentBeats = [];
-        
-        for (let i = end - 1; i >= 0 && recentBeats.length < win; i--) {
-            if (data[i].beat) recentBeats.push(i);
-        }
-        
-        if (recentBeats.length >= 2) {
-            const newest = recentBeats[0];
-            const oldest = recentBeats[recentBeats.length - 1];
-            const diffSecs = (newest - oldest) * avgDt;
+        // Use actual timestamps for review display
+        if (end > 0 && data[end - 1]) {
+            const currentTime = data[end - 1].time;
+            const totalTime = data[data.length - 1].time;
+            const timeFromEnd = totalTime - currentTime;
+            els.reviewTimeDisplay.innerText = `-${timeFromEnd.toFixed(1)}s`;
             
-            if (diffSecs > 0) {
-                const bpm = 60 * (recentBeats.length - 1) / diffSecs;
-                displayBpm = Math.round(bpm);
+            // Recalculate BPM based on visible window
+            const values = data.slice(0, end).map(d => d.val);
+            const timestamps = data.slice(0, end).map(d => d.time);
+            const thresholds = calculateThreshold(values);
+            const beatIndices = detectBeats(values, thresholds);
+            const displayBpm = calculateBPM(
+                beatIndices,
+                values,
+                timestamps,
+                cfg.bpmCalculationWindow
+            );
+            
+            if (displayBpm) {
+                els.bpmDisplay.innerText = displayBpm;
             }
-        } else if (data[end - 1] && data[end - 1].bpm) {
-            displayBpm = data[end - 1].bpm;
         }
-
-        els.bpmDisplay.innerText = displayBpm;
-        els.reviewTimeDisplay.innerText = 
-            `-${((data.length - end) * avgDt).toFixed(1)}s`;
     }
 
     const viewData = data.slice(start, end);
@@ -1262,21 +1262,17 @@ function draw(dataSource) {
     const sy = els.canvas.height / 2.2;
     const my = v => cy - v * sy;
 
-    const totalDuration = state.mode === 'review' ? 
-        (data.duration || state.totalTime) : state.totalTime;
-    const safeDur = totalDuration || 1;
-
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
     ctx.font = "9px monospace";
 
+    // Draw grid lines using actual timestamps
     for (let i = 0; i < viewData.length; i++) {
-        const absIndex = start + i;
-        const timeAtPixel = (absIndex / Math.max(data.length, 1)) * safeDur;
-        const prevIndex = start + i - 1;
-        const prevTimeAtPixel = (prevIndex / Math.max(data.length, 1)) * safeDur;
+        const currentTime = viewData[i].time;
+        const prevTime = i > 0 ? viewData[i - 1].time : currentTime;
         
-        if (Math.floor(timeAtPixel * 5) !== Math.floor(prevTimeAtPixel * 5)) {
+        // 200ms grid (5Hz)
+        if (Math.floor(currentTime * 5) !== Math.floor(prevTime * 5)) {
             ctx.beginPath();
             ctx.strokeStyle = 'rgba(255,255,255,0.03)';
             ctx.moveTo(i, 0);
@@ -1284,7 +1280,8 @@ function draw(dataSource) {
             ctx.stroke();
         }
 
-        if (Math.floor(timeAtPixel) !== Math.floor(prevTimeAtPixel)) {
+        // 1 second grid
+        if (Math.floor(currentTime) !== Math.floor(prevTime)) {
             ctx.beginPath();
             ctx.strokeStyle = 'rgba(255,255,255,0.15)';
             ctx.moveTo(i, 0);
@@ -1292,10 +1289,11 @@ function draw(dataSource) {
             ctx.stroke();
             
             ctx.fillStyle = 'rgba(255,255,255,0.3)';
-            ctx.fillText(Math.floor(timeAtPixel) + 's', i, els.canvas.height - 2);
+            ctx.fillText(Math.floor(currentTime) + 's', i, els.canvas.height - 2);
         }
     }
 
+    // Draw threshold line
     ctx.beginPath();
     ctx.strokeStyle = 'rgba(255,200,0,0.3)';
     ctx.setLineDash([4, 4]);
@@ -1311,6 +1309,7 @@ function draw(dataSource) {
     ctx.stroke();
     ctx.setLineDash([]);
 
+    // Draw signal
     const color = state.mode === 'simulate' ? '#a855f7' :
                   (state.mode === 'review' ? '#f59e0b' : '#ef4444');
     
@@ -1328,11 +1327,13 @@ function draw(dataSource) {
     
     ctx.stroke();
 
+    // Fill area under signal
     ctx.lineTo(viewData.length - 1, els.canvas.height);
     ctx.lineTo(0, els.canvas.height);
     ctx.fillStyle = color + "20";
     ctx.fill();
 
+    // Draw beat markers
     ctx.fillStyle = "#fff";
     
     viewData.forEach((d, i) => {
