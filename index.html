@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Pulse Monitor v2.4</title>
+    <title>Pulse Monitor v2.5</title>
     
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -270,12 +270,83 @@
             </div>
 
             <div class="mt-4 text-center">
-                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.4</span>
+                <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.5</span>
             </div>
         </div>
     </div>
 
 <script>
+'use strict';
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+const CONSTANTS = {
+    VERSION: 4,
+    
+    SIGNAL: {
+        WARMUP_FRAMES: 30,
+        MAX_HISTORY_LENGTH: 10800,
+        NORMALIZATION_WINDOW: 120,
+        GAIN_SMOOTHING: 0.95,
+        TARGET_GAIN_RANGE: 0.7,
+        SIGNAL_CLAMP_MIN: -0.6,
+        SIGNAL_CLAMP_MAX: 0.6,
+        SATURATION_THRESHOLD: 250
+    },
+    
+    BEAT_DETECTION: {
+        MIN_GAP_SAMPLES: 15,
+        MIN_AMPLITUDE: 0.15,
+        DECAY_RATE: 0.99,
+        THRESHOLD_MULTIPLIER: 0.5,
+        BASE_THRESHOLD: 0.05,
+        REFRACTORY_PERIOD_MS: 250,
+        REFRACTORY_MIN_MS: 250,
+        REFRACTORY_MAX_MS: 1000,
+        REFRACTORY_FACTOR: 0.6
+    },
+    
+    BPM: {
+        DEFAULT_WINDOW: 8,
+        SMOOTHING: 0.7,
+        MS_PER_MINUTE: 60000
+    },
+    
+    SIMULATION: {
+        DEFAULT_BPM: 75,
+        GAUSSIAN_P_WAVE: { amplitude: 0.3, center: 0.5, width: 0.12 },
+        GAUSSIAN_QRS: { amplitude: 1.0, center: 0.2, width: 0.08 },
+        NOISE_AMPLITUDE: 0.1,
+        SIGNAL_SCALE: 0.05
+    },
+    
+    STORAGE: {
+        KEY: 'hr_records',
+        SETTINGS_KEY: 'pulse_settings',
+        QUOTA_WARNING: 0.85,
+        QUOTA_CRITICAL: 0.95,
+        MIN_SAVE_LENGTH: 60,
+        DELETE_BATCH_SIZE: 10
+    },
+    
+    UI: {
+        BEAT_INDICATOR_DURATION: 100,
+        GRID_MINOR_INTERVAL: 0.2,
+        GRID_MAJOR_INTERVAL: 1.0,
+        CANVAS_BUFFER_SECONDS: 3
+    },
+    
+    CAMERA: {
+        IDEAL_WIDTH: 320,
+        IDEAL_HEIGHT: 240,
+        IDEAL_FPS: 60,
+        MIN_FPS: 30,
+        PREVIEW_SIZE: 30,
+        EXPOSURE_COMPENSATION: -1.0
+    }
+};
+
 // ============================================================================
 // PWA Setup
 // ============================================================================
@@ -302,87 +373,656 @@
 })();
 
 // ============================================================================
-// Wake Lock
+// SIGNAL PROCESSING MODULE
 // ============================================================================
-let wakeLock = null;
-const wakeLockIndicator = document.getElementById('wakeLockIndicator');
-
-async function acquireWakeLock() {
-    if ('wakeLock' in navigator && !wakeLock) {
-        try {
-            wakeLock = await navigator.wakeLock.request('screen');
-            wakeLockIndicator.classList.remove('hidden');
-            
-            wakeLock.addEventListener('release', () => {
-                wakeLock = null;
-                wakeLockIndicator.classList.add('hidden');
-            });
-        } catch (err) {
-            console.warn('Wake Lock error', err);
+const SignalProcessor = {
+    recentValues: [],
+    currentGain: 1.0,
+    signalMean: 0,
+    framesSinceStart: 0,
+    
+    reset() {
+        this.recentValues = [];
+        this.currentGain = 1.0;
+        this.signalMean = 0;
+        this.framesSinceStart = 0;
+    },
+    
+    normalize(val) {
+        this.recentValues.push(val);
+        
+        if (this.recentValues.length > CONSTANTS.SIGNAL.NORMALIZATION_WINDOW) {
+            this.recentValues.shift();
         }
-    }
-}
-
-async function releaseWakeLock() {
-    if (wakeLock) {
-        try {
-            await wakeLock.release();
-        } catch(e) {
-            console.warn('Wake Lock release error', e);
+        
+        let min = -0.01;
+        let max = 0.01;
+        
+        for (let v of this.recentValues) {
+            if (v < min) min = v;
+            if (v > max) max = v;
         }
-        wakeLock = null;
-        wakeLockIndicator.classList.add('hidden');
+        
+        const targetGain = CONSTANTS.SIGNAL.TARGET_GAIN_RANGE / ((max - min) || 0.1);
+        this.currentGain = (this.currentGain * CONSTANTS.SIGNAL.GAIN_SMOOTHING) + 
+                          (targetGain * (1 - CONSTANTS.SIGNAL.GAIN_SMOOTHING));
+        
+        const normalized = val * this.currentGain;
+        
+        return Math.max(
+            CONSTANTS.SIGNAL.SIGNAL_CLAMP_MIN,
+            Math.min(CONSTANTS.SIGNAL.SIGNAL_CLAMP_MAX, normalized)
+        );
+    },
+    
+    processFrame(videoElement, offscreenContext) {
+        const size = CONSTANTS.CAMERA.PREVIEW_SIZE;
+        offscreenContext.drawImage(videoElement, 0, 0, size, size);
+        const data = offscreenContext.getImageData(0, 0, size, size).data;
+        
+        let sum = 0;
+        let count = 0;
+        
+        for (let i = 0; i < data.length; i += 16) {
+            sum += data[i + 1];
+            count++;
+        }
+        
+        const avg = sum / count;
+        
+        const isSaturated = avg > CONSTANTS.SIGNAL.SATURATION_THRESHOLD;
+        
+        if (this.framesSinceStart < CONSTANTS.SIGNAL.WARMUP_FRAMES) {
+            this.signalMean = avg;
+            this.framesSinceStart++;
+            return { signal: 0, isSaturated };
+        }
+        
+        this.signalMean = (this.signalMean * 0.95) + (avg * 0.05);
+        
+        return {
+            signal: this.normalize(this.signalMean - avg),
+            isSaturated
+        };
+    },
+    
+    generateSimulation(phase, bpm, totalTime) {
+        const duration = 60 / bpm;
+        const t = (phase % duration) / duration;
+        
+        const gaussian = (params) => {
+            const { amplitude, center, width } = params;
+            return amplitude * Math.exp(-Math.pow(t - center, 2) / (2 * width * width));
+        };
+        
+        const signal = 
+            gaussian(CONSTANTS.SIMULATION.GAUSSIAN_QRS) + 
+            gaussian(CONSTANTS.SIMULATION.GAUSSIAN_P_WAVE) + 
+            Math.sin(totalTime) * CONSTANTS.SIMULATION.NOISE_AMPLITUDE;
+        
+        return this.normalize(signal * CONSTANTS.SIMULATION.SIGNAL_SCALE);
     }
-}
-
-// ============================================================================
-// Settings & State
-// ============================================================================
-const cfg = {
-    showPreview: false,
-    autoStopSeconds: 0,
-    bpmCalculationWindow: 8,
-    autoSave: false,
-    maxRecords: 50
 };
 
-const state = {
+// ============================================================================
+// BEAT DETECTION MODULE
+// ============================================================================
+const BeatDetector = {
+    lastBeatTime: 0,
+    refractoryPeriod: CONSTANTS.BEAT_DETECTION.REFRACTORY_PERIOD_MS,
+    runningMax: 0.1,
+    threshold: CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD,
+    detectedBeats: [],
+    bpm: 0,
+    
+    reset() {
+        this.lastBeatTime = 0;
+        this.refractoryPeriod = CONSTANTS.BEAT_DETECTION.REFRACTORY_PERIOD_MS;
+        this.runningMax = 0.1;
+        this.threshold = CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD;
+        this.detectedBeats = [];
+        this.bpm = 0;
+    },
+    
+    process(signal, timestamp, bpmWindow) {
+        this.runningMax *= CONSTANTS.BEAT_DETECTION.DECAY_RATE;
+        this.threshold = Math.max(
+            this.runningMax * CONSTANTS.BEAT_DETECTION.THRESHOLD_MULTIPLIER,
+            CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD
+        );
+        
+        if (signal > this.runningMax) {
+            this.runningMax = signal;
+        }
+        
+        let isBeat = false;
+        
+        if (signal > this.threshold && 
+            (timestamp - this.lastBeatTime) > this.refractoryPeriod &&
+            this.runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE) {
+            
+            this.lastBeatTime = timestamp;
+            isBeat = true;
+            
+            this.detectedBeats.push(timestamp);
+            
+            while(this.detectedBeats.length > bpmWindow) {
+                this.detectedBeats.shift();
+            }
+
+            if (this.detectedBeats.length >= 2) {
+                let sum = 0;
+                for (let i = 1; i < this.detectedBeats.length; i++) {
+                    sum += (this.detectedBeats[i] - this.detectedBeats[i-1]);
+                }
+                
+                const avgInterval = sum / (this.detectedBeats.length - 1);
+                const newBpm = CONSTANTS.BPM.MS_PER_MINUTE / avgInterval;
+                
+                this.bpm = this.bpm === 0 ? 
+                    newBpm : 
+                    (this.bpm * CONSTANTS.BPM.SMOOTHING + newBpm * (1 - CONSTANTS.BPM.SMOOTHING));
+                
+                this.refractoryPeriod = Math.max(
+                    CONSTANTS.BEAT_DETECTION.REFRACTORY_MIN_MS,
+                    Math.min(
+                        (CONSTANTS.BPM.MS_PER_MINUTE / this.bpm) * CONSTANTS.BEAT_DETECTION.REFRACTORY_FACTOR,
+                        CONSTANTS.BEAT_DETECTION.REFRACTORY_MAX_MS
+                    )
+                );
+            }
+        }
+        
+        return {
+            isBeat,
+            threshold: this.threshold,
+            bpm: Math.round(this.bpm)
+        };
+    },
+    
+    calculateThreshold(samples) {
+        let runningMax = 0.1;
+        const results = [];
+        
+        samples.forEach(val => {
+            runningMax *= CONSTANTS.BEAT_DETECTION.DECAY_RATE;
+            if (val > runningMax) runningMax = val;
+            
+            const threshold = Math.max(
+                runningMax * CONSTANTS.BEAT_DETECTION.THRESHOLD_MULTIPLIER,
+                CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD
+            );
+            results.push({ threshold, runningMax });
+        });
+        
+        return results;
+    },
+    
+    detectBeats(samples, thresholds) {
+        const beatIndices = [];
+        let lastBeatIndex = -1000;
+        
+        samples.forEach((val, i) => {
+            const { threshold, runningMax } = thresholds[i];
+            
+            if (val > threshold && 
+                (i - lastBeatIndex) > CONSTANTS.BEAT_DETECTION.MIN_GAP_SAMPLES && 
+                runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE) {
+                beatIndices.push(i);
+                lastBeatIndex = i;
+            }
+        });
+        
+        return beatIndices;
+    },
+    
+    calculateBPM(beatIndices, timestamps, windowSize) {
+        if (beatIndices.length < 2 || !timestamps) return null;
+        
+        const recent = beatIndices.slice(-windowSize);
+        if (recent.length < 2) return null;
+        
+        const firstTime = timestamps[recent[0]];
+        const lastTime = timestamps[recent[recent.length - 1]];
+        const timeSpan = lastTime - firstTime;
+        
+        if (timeSpan <= 0) return null;
+        
+        const bpm = 60 * (recent.length - 1) / timeSpan;
+        return Math.round(bpm);
+    }
+};
+
+// ============================================================================
+// STORAGE MODULE
+// ============================================================================
+const Storage = {
+    async save(recording) {
+        const records = this.loadAll();
+        
+        if (Config.maxRecords > 0 && records.length >= Config.maxRecords) {
+            records.splice(Config.maxRecords - 1);
+        }
+
+        const existingIndex = records.findIndex(r => r.id === recording.id);
+        
+        if (existingIndex >= 0) {
+            records[existingIndex] = recording;
+        } else {
+            records.unshift(recording);
+        }
+
+        localStorage.setItem(CONSTANTS.STORAGE.KEY, JSON.stringify(records));
+    },
+    
+    loadAll() {
+        const raw = localStorage.getItem(CONSTANTS.STORAGE.KEY);
+        if (!raw) return [];
+        
+        try {
+            const records = JSON.parse(raw);
+            return records.filter(r => r.v === CONSTANTS.VERSION && Array.isArray(r.samples));
+        } catch(e) {
+            console.error('Failed to load records', e);
+            return [];
+        }
+    },
+    
+    delete(id) {
+        const records = this.loadAll();
+        const filtered = records.filter(r => r.id !== id);
+        localStorage.setItem(CONSTANTS.STORAGE.KEY, JSON.stringify(filtered));
+    },
+    
+    deleteOldest(count = CONSTANTS.STORAGE.DELETE_BATCH_SIZE) {
+        const records = this.loadAll();
+        if (records.length === 0) return 0;
+        
+        records.splice(records.length - count, count);
+        localStorage.setItem(CONSTANTS.STORAGE.KEY, JSON.stringify(records));
+        return count;
+    },
+    
+    exportAll() {
+        const raw = localStorage.getItem(CONSTANTS.STORAGE.KEY);
+        if (!raw) return null;
+        
+        const blob = new Blob([raw], { type: 'application/json' });
+        return URL.createObjectURL(blob);
+    },
+    
+    async getQuotaInfo() {
+        if (!navigator.storage || !navigator.storage.estimate) {
+            return null;
+        }
+        
+        try {
+            const estimate = await navigator.storage.estimate();
+            return {
+                usage: estimate.usage,
+                quota: estimate.quota,
+                usageRatio: estimate.quota > 0 ? estimate.usage / estimate.quota : 0
+            };
+        } catch(e) {
+            console.warn('Quota check failed', e);
+            return null;
+        }
+    },
+    
+    getStorageSize() {
+        const records = this.loadAll();
+        const jsonStr = JSON.stringify(records);
+        return new Blob([jsonStr]).size;
+    }
+};
+
+// ============================================================================
+// CONFIG MODULE
+// ============================================================================
+const Config = {
+    showPreview: false,
+    autoStopSeconds: 0,
+    bpmCalculationWindow: CONSTANTS.BPM.DEFAULT_WINDOW,
+    autoSave: false,
+    maxRecords: 50,
+    
+    load() {
+        const saved = localStorage.getItem(CONSTANTS.STORAGE.SETTINGS_KEY);
+        if (saved) {
+            try {
+                Object.assign(this, JSON.parse(saved));
+            } catch(e) {
+                console.error('Failed to load settings', e);
+            }
+        }
+    },
+    
+    save() {
+        const data = {
+            showPreview: this.showPreview,
+            autoStopSeconds: this.autoStopSeconds,
+            bpmCalculationWindow: this.bpmCalculationWindow,
+            autoSave: this.autoSave,
+            maxRecords: this.maxRecords
+        };
+        localStorage.setItem(CONSTANTS.STORAGE.SETTINGS_KEY, JSON.stringify(data));
+    }
+};
+
+// ============================================================================
+// RENDERER MODULE
+// ============================================================================
+const Renderer = {
+    drawSignal(canvas, ctx, data, mode, viewStart, viewEnd) {
+        if (!data || !data.length) return;
+        
+        const viewData = data.slice(viewStart, viewEnd);
+        if (!viewData.length) return;
+
+        const cy = canvas.height / 2;
+        const sy = canvas.height / 2.2;
+        const my = v => cy - v * sy;
+
+        // Draw grid
+        this._drawGrid(ctx, canvas, viewData);
+
+        // Draw threshold line
+        this._drawThreshold(ctx, viewData, my);
+
+        // Draw signal
+        const color = mode === 'simulate' ? '#a855f7' :
+                     (mode === 'review' ? '#f59e0b' : '#ef4444');
+        
+        this._drawWaveform(ctx, canvas, viewData, my, color);
+
+        // Draw beat markers
+        this._drawBeats(ctx, viewData, my);
+    },
+    
+    _drawGrid(ctx, canvas, viewData) {
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.font = "9px monospace";
+
+        for (let i = 0; i < viewData.length; i++) {
+            const currentTime = viewData[i].time;
+            const prevTime = i > 0 ? viewData[i - 1].time : currentTime;
+            
+            // Minor grid (200ms)
+            if (Math.floor(currentTime / CONSTANTS.UI.GRID_MINOR_INTERVAL) !== 
+                Math.floor(prevTime / CONSTANTS.UI.GRID_MINOR_INTERVAL)) {
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, canvas.height);
+                ctx.stroke();
+            }
+
+            // Major grid (1 second)
+            if (Math.floor(currentTime / CONSTANTS.UI.GRID_MAJOR_INTERVAL) !== 
+                Math.floor(prevTime / CONSTANTS.UI.GRID_MAJOR_INTERVAL)) {
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, canvas.height);
+                ctx.stroke();
+                
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.fillText(
+                    Math.floor(currentTime / CONSTANTS.UI.GRID_MAJOR_INTERVAL) + 's', 
+                    i, 
+                    canvas.height - 2
+                );
+            }
+        }
+    },
+    
+    _drawThreshold(ctx, viewData, yTransform) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255,200,0,0.3)';
+        ctx.setLineDash([4, 4]);
+        
+        viewData.forEach((d, i) => {
+            if (i === 0) {
+                ctx.moveTo(i, yTransform(d.threshold));
+            } else {
+                ctx.lineTo(i, yTransform(d.threshold));
+            }
+        });
+        
+        ctx.stroke();
+        ctx.setLineDash([]);
+    },
+    
+    _drawWaveform(ctx, canvas, viewData, yTransform, color) {
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        
+        viewData.forEach((d, i) => {
+            if (i === 0) {
+                ctx.moveTo(i, yTransform(d.val));
+            } else {
+                ctx.lineTo(i, yTransform(d.val));
+            }
+        });
+        
+        ctx.stroke();
+
+        // Fill area under curve
+        ctx.lineTo(viewData.length - 1, canvas.height);
+        ctx.lineTo(0, canvas.height);
+        ctx.fillStyle = color + "20";
+        ctx.fill();
+    },
+    
+    _drawBeats(ctx, viewData, yTransform) {
+        ctx.fillStyle = "#fff";
+        
+        viewData.forEach((d, i) => {
+            if (d.beat) {
+                ctx.beginPath();
+                ctx.arc(i, yTransform(d.val), 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
+    }
+};
+
+// ============================================================================
+// CAMERA MODULE
+// ============================================================================
+const Camera = {
+    stream: null,
+    
+    async start(videoElement) {
+        try {
+            const constraints = {
+                audio: false,
+                video: {
+                    facingMode: 'environment',
+                    width: { ideal: CONSTANTS.CAMERA.IDEAL_WIDTH },
+                    height: { ideal: CONSTANTS.CAMERA.IDEAL_HEIGHT },
+                    frameRate: { ideal: CONSTANTS.CAMERA.IDEAL_FPS, min: CONSTANTS.CAMERA.MIN_FPS }
+                }
+            };
+            
+            this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+            videoElement.srcObject = this.stream;
+            
+            await new Promise(r => videoElement.onloadedmetadata = r);
+            
+            const track = this.stream.getVideoTracks()[0];
+            const torchAvailable = await this._applyOptimizedConstraints(track);
+            await videoElement.play();
+            
+            return { track, torchAvailable };
+            
+        } catch (err) {
+            console.error("Camera Error:", err);
+            throw err;
+        }
+    },
+    
+    async _applyOptimizedConstraints(track) {
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        const advanced = [];
+        const mainConstraints = {};
+
+        if (caps.torch) {
+            advanced.push({ torch: true });
+        }
+        
+        if (caps.focusMode && caps.focusMode.includes('continuous')) {
+            mainConstraints.focusMode = 'continuous';
+        }
+        
+        if (caps.whiteBalanceMode && caps.whiteBalanceMode.includes('single-shot')) {
+            mainConstraints.whiteBalanceMode = 'single-shot';
+        }
+        
+        if (caps.exposureCompensation) {
+            const minExp = caps.exposureCompensation.min || -2;
+            const maxExp = caps.exposureCompensation.max || 2;
+            mainConstraints.exposureCompensation = Math.max(
+                minExp, 
+                Math.min(maxExp, CONSTANTS.CAMERA.EXPOSURE_COMPENSATION)
+            );
+        }
+        
+        if (caps.iso && caps.iso.min) {
+            mainConstraints.iso = caps.iso.min;
+        }
+        
+        if (caps.frameRate && caps.frameRate.max >= 55) {
+            mainConstraints.frameRate = { ideal: CONSTANTS.CAMERA.IDEAL_FPS };
+        }
+
+        try {
+            await track.applyConstraints({ advanced, ...mainConstraints });
+            return true;
+            
+        } catch (e) {
+            console.warn('Could not apply advanced constraints:', e);
+            
+            if (caps.torch) {
+                try {
+                    await track.applyConstraints({ advanced: [{ torch: true }] });
+                    return true;
+                } catch(err) {
+                    console.error('Torch unavailable:', err);
+                    return false;
+                }
+            }
+            return false;
+        }
+    },
+    
+    getStats(track) {
+        const s = track.getSettings();
+        return {
+            resolution: `${s.width}x${s.height}`,
+            fps: s.frameRate ? s.frameRate.toFixed(1) : '--',
+            exposure: s.exposureCompensation || s.exposureMode || '--',
+            iso: s.iso || '--'
+        };
+    },
+    
+    stop() {
+        if (this.stream) {
+            this.stream.getTracks().forEach(t => {
+                try {
+                    t.applyConstraints({ advanced: [{ torch: false }] });
+                } catch(e) {
+                    console.warn('Failed to turn off torch', e);
+                }
+                t.stop();
+            });
+            this.stream = null;
+        }
+    }
+};
+
+// ============================================================================
+// WAKE LOCK MODULE
+// ============================================================================
+const WakeLock = {
+    lock: null,
+    
+    async acquire() {
+        if ('wakeLock' in navigator && !this.lock) {
+            try {
+                this.lock = await navigator.wakeLock.request('screen');
+                
+                this.lock.addEventListener('release', () => {
+                    this.lock = null;
+                });
+                
+                return true;
+            } catch (err) {
+                console.warn('Wake Lock error', err);
+                return false;
+            }
+        }
+        return false;
+    },
+    
+    async release() {
+        if (this.lock) {
+            try {
+                await this.lock.release();
+            } catch(e) {
+                console.warn('Wake Lock release error', e);
+            }
+            this.lock = null;
+        }
+    }
+};
+
+// ============================================================================
+// APPLICATION STATE
+// ============================================================================
+const AppState = {
     mode: 'idle',
     lastTime: 0,
     totalTime: 0,
     history: [],
+    reviewData: null,
     reviewOffset: 0,
-    signalMean: 0,
-    framesSinceStart: 0,
-    recentValues: [],
-    currentGain: 1.0,
     simPhase: 0,
-    simBpm: 75
-};
-
-let reviewData = null;
-
-const session = {
-    id: null,
-    startTime: null
-};
-
-const algo = {
-    lastBeatTime: 0,
-    refractoryPeriod: 250,
-    runningMax: 0.1,
-    threshold: 0.05,
-    decayRate: 0.99,
-    detectedBeats: [],
-    bpm: 0
+    simBpm: CONSTANTS.SIMULATION.DEFAULT_BPM,
+    sessionId: null,
+    sessionStartTime: null,
+    
+    reset() {
+        this.history = [];
+        this.totalTime = 0;
+        this.reviewData = null;
+        this.reviewOffset = 0;
+        SignalProcessor.reset();
+        BeatDetector.reset();
+    },
+    
+    startSession() {
+        this.sessionId = Date.now();
+        this.sessionStartTime = new Date().toISOString();
+    },
+    
+    addHistoryPoint(time, val, threshold, beat, bpm) {
+        this.history.push({ time, val, threshold, beat, bpm });
+        
+        if (this.history.length > CONSTANTS.SIGNAL.MAX_HISTORY_LENGTH) {
+            this.history.shift();
+        }
+    }
 };
 
 // ============================================================================
-// DOM Elements
+// DOM ELEMENTS
 // ============================================================================
 const $ = id => document.getElementById(id);
 
-const els = {
+const DOM = {
     video: $('videoElement'),
     canvas: $('ppgCanvas'),
     preview: $('previewCanvas'),
@@ -422,19 +1062,81 @@ const els = {
     statRes: $('statRes'),
     statFps: $('statFps'),
     statExp: $('statExp'),
-    statIso: $('statIso')
+    statIso: $('statIso'),
+    wakeLockIndicator: $('wakeLockIndicator')
 };
 
-const ctx = els.canvas.getContext('2d');
-const offCtx = els.preview.getContext('2d', { willReadFrequently: true });
+const ctx = DOM.canvas.getContext('2d');
+const offCtx = DOM.preview.getContext('2d', { willReadFrequently: true });
 
-let stream = null;
 let animationFrameId = null;
 
 // ============================================================================
-// Mode Configuration
+// UI HELPERS
 // ============================================================================
-const modeConfig = {
+const UI = {
+    toggleClasses(el, add, remove) {
+        if (remove) el.classList.remove(...remove);
+        if (add) el.classList.add(...add);
+    },
+    
+    flashBeatIndicator() {
+        this.toggleClasses(DOM.beatIndicator, ['bg-red-500', 'scale-150']);
+        setTimeout(() => {
+            this.toggleClasses(DOM.beatIndicator, null, ['bg-red-500', 'scale-150']);
+        }, CONSTANTS.UI.BEAT_INDICATOR_DURATION);
+    },
+    
+    updateBPMDisplay(bpm, colorClass) {
+        DOM.bpmDisplay.innerText = bpm;
+        DOM.bpmDisplay.className = 
+            "text-4xl font-mono font-bold tracking-tighter " + colorClass;
+    },
+    
+    updateGainDisplay(gain) {
+        DOM.debugGain.innerText = gain.toFixed(1);
+    },
+    
+    showSaturationWarning(show) {
+        DOM.saturationWarning.classList.toggle('hidden', !show);
+    },
+    
+    showTorchWarning(show) {
+        DOM.torchWarning.classList.toggle('hidden', !show);
+    },
+    
+    updateStorageInfo() {
+        const sizeMB = (Storage.getStorageSize() / 1024 / 1024).toFixed(2);
+        const sizeNum = parseFloat(sizeMB);
+        
+        DOM.storageInfo.innerText = `${sizeMB}MB / ~5MB`;
+        
+        if (sizeNum > 4.5) {
+            DOM.storageInfo.className = "text-[9px] font-mono text-rose-500 font-bold";
+        } else if (sizeNum > 3.5) {
+            DOM.storageInfo.className = "text-[9px] font-mono text-amber-500 font-bold";
+        } else {
+            DOM.storageInfo.className = "text-[9px] font-mono text-slate-600";
+        }
+    },
+    
+    updateCameraStats(track) {
+        const stats = Camera.getStats(track);
+        DOM.statRes.innerText = stats.resolution;
+        DOM.statFps.innerText = stats.fps;
+        DOM.statExp.innerText = stats.exposure;
+        DOM.statIso.innerText = stats.iso;
+    },
+    
+    updateWakeLockIndicator(active) {
+        DOM.wakeLockIndicator.classList.toggle('hidden', !active);
+    }
+};
+
+// ============================================================================
+// MODE CONFIGURATION
+// ============================================================================
+const ModeConfig = {
     idle: {
         badge: {
             text: "IDLE",
@@ -478,229 +1180,205 @@ const modeConfig = {
 };
 
 // ============================================================================
-// Helper Functions
+// CANVAS RESIZE
 // ============================================================================
-const toggleClasses = (el, add, remove) => {
-    if (remove) el.classList.remove(...remove);
-    if (add) el.classList.add(...add);
-};
-
-// ============================================================================
-// Shared Algorithm Functions
-// ============================================================================
-function calculateThreshold(samples) {
-    const decayRate = algo.decayRate;
-    let runningMax = 0.1;
-    const results = [];
-    
-    samples.forEach(val => {
-        runningMax *= decayRate;
-        if (val > runningMax) runningMax = val;
-        
-        const threshold = Math.max(runningMax * 0.5, 0.05);
-        results.push({ threshold, runningMax });
-    });
-    
-    return results;
+function resizeCanvas() {
+    DOM.canvas.width = DOM.container.clientWidth;
+    DOM.canvas.height = DOM.container.clientHeight;
 }
 
-function detectBeats(samples, thresholds, timestamps = null) {
-    const beatIndices = [];
-    let lastBeatIndex = -1000;
-    const minGap = 15;
-    
-    samples.forEach((val, i) => {
-        const { threshold, runningMax } = thresholds[i];
-        
-        if (val > threshold && 
-            (i - lastBeatIndex) > minGap && 
-            runningMax > 0.15) {
-            beatIndices.push(i);
-            lastBeatIndex = i;
-        }
-    });
-    
-    return beatIndices;
-}
-
-function calculateBPM(beatIndices, samples, timestamps, windowSize = 8) {
-    if (beatIndices.length < 2 || !timestamps) return null;
-    
-    const recent = beatIndices.slice(-windowSize);
-    if (recent.length < 2) return null;
-    
-    const firstTime = timestamps[recent[0]];
-    const lastTime = timestamps[recent[recent.length - 1]];
-    const timeSpan = lastTime - firstTime;
-    
-    if (timeSpan <= 0) return null;
-    
-    const bpm = 60 * (recent.length - 1) / timeSpan;
-    return Math.round(bpm);
-}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
 
 // ============================================================================
-// Settings Management
+// SETTINGS MANAGEMENT
 // ============================================================================
 function loadSettings() {
-    const saved = localStorage.getItem('pulse_settings');
-    if (saved) {
-        try {
-            Object.assign(cfg, JSON.parse(saved));
-        } catch(e) {
-            console.error('Failed to load settings', e);
-        }
-    }
+    Config.load();
     
-    els.settingPreview.checked = cfg.showPreview;
-    els.settingAutoStop.value = cfg.autoStopSeconds;
-    els.settingAutoSave.checked = cfg.autoSave;
-    els.settingBpmWindow.value = cfg.bpmCalculationWindow;
-    els.settingMaxRecords.value = cfg.maxRecords;
+    DOM.settingPreview.checked = Config.showPreview;
+    DOM.settingAutoStop.value = Config.autoStopSeconds;
+    DOM.settingAutoSave.checked = Config.autoSave;
+    DOM.settingBpmWindow.value = Config.bpmCalculationWindow;
+    DOM.settingMaxRecords.value = Config.maxRecords;
     
-    togglePreview();
+    updatePreviewVisibility();
 }
 
 function saveSettings() {
-    cfg.showPreview = els.settingPreview.checked;
-    cfg.autoStopSeconds = parseInt(els.settingAutoStop.value) || 0;
-    cfg.bpmCalculationWindow = parseInt(els.settingBpmWindow.value) || 8;
-    cfg.maxRecords = parseInt(els.settingMaxRecords.value) || 0;
-    cfg.autoSave = els.settingAutoSave.checked;
+    Config.showPreview = DOM.settingPreview.checked;
+    Config.autoStopSeconds = parseInt(DOM.settingAutoStop.value) || 0;
+    Config.bpmCalculationWindow = parseInt(DOM.settingBpmWindow.value) || CONSTANTS.BPM.DEFAULT_WINDOW;
+    Config.maxRecords = parseInt(DOM.settingMaxRecords.value) || 0;
+    Config.autoSave = DOM.settingAutoSave.checked;
     
-    localStorage.setItem('pulse_settings', JSON.stringify(cfg));
-    togglePreview();
+    Config.save();
+    updatePreviewVisibility();
     
-    algo.detectedBeats = [];
-    algo.bpm = 0;
+    BeatDetector.reset();
 }
 
-function togglePreview() {
-    els.preview.classList.toggle('hidden', !cfg.showPreview);
+function updatePreviewVisibility() {
+    DOM.preview.classList.toggle('hidden', !Config.showPreview);
 }
 
 // ============================================================================
-// Canvas Resize
-// ============================================================================
-function resize() {
-    els.canvas.width = els.container.clientWidth;
-    els.canvas.height = els.container.clientHeight;
-}
-
-window.addEventListener('resize', resize);
-resize();
-
-// ============================================================================
-// Mode Management
+// MODE MANAGEMENT
 // ============================================================================
 async function setMode(newMode) {
-    const prevMode = state.mode;
+    const prevMode = AppState.mode;
     
     // AUTO-SAVE CHECK FIRST - before any mode changes
     if ((prevMode === 'camera' || prevMode === 'simulate') && newMode === 'idle') {
-        if (cfg.autoSave && state.history.length > 60) {
-            await saveRec();
+        if (Config.autoSave && AppState.history.length >= CONSTANTS.STORAGE.MIN_SAVE_LENGTH) {
+            await saveRecording();
         }
     }
     
-    // Now transition mode
-    if (prevMode === 'camera' || prevMode === 'simulate') {
-        state.mode = 'transition';
-    }
-    
+    // Cleanup previous mode
     if (prevMode === 'camera' && newMode !== 'camera') {
-        stopCamera();
-        releaseWakeLock();
+        Camera.stop();
+        await WakeLock.release();
+        UI.updateWakeLockIndicator(false);
+        DOM.video.pause();
+        DOM.video.srcObject = null;
     }
     
     if (prevMode === 'review' && newMode !== 'review') {
-        reviewData = null;
+        AppState.reviewData = null;
     }
 
-    state.mode = newMode;
-    state.history = [];
-    state.totalTime = 0;
-    state.framesSinceStart = 0;
-    state.signalMean = 0;
-    state.recentValues = [];
-    state.currentGain = 1.0;
-    algo.bpm = 0;
-    algo.detectedBeats = [];
-    algo.lastBeatTime = 0;
+    // Update mode and reset state
+    AppState.mode = newMode;
+    AppState.reset();
     
-    els.saturationWarning.classList.add('hidden');
-    els.torchWarning.classList.add('hidden');
-
-    if (newMode === 'camera' || newMode === 'simulate') {
-        session.id = Date.now();
-        session.startTime = new Date().toISOString();
-    } else {
-        session.id = null;
-        session.startTime = null;
-    }
-
-    els.instructionOverlay.classList.add('hidden');
-    els.saveBtn.disabled = true;
-    els.saveBtn.innerText = "Save";
+    UI.showSaturationWarning(false);
+    UI.showTorchWarning(false);
+    DOM.instructionOverlay.classList.add('hidden');
+    DOM.saveBtn.disabled = true;
+    DOM.saveBtn.innerText = "Save";
     
-    toggleClasses(els.reviewControls, null, ['flex']);
-    els.reviewControls.classList.add('hidden');
-    els.simControls.classList.add('hidden');
+    UI.toggleClasses(DOM.reviewControls, null, ['flex']);
+    DOM.reviewControls.classList.add('hidden');
+    DOM.simControls.classList.add('hidden');
     
-    toggleClasses(
-        els.bpmDisplay,
+    UI.toggleClasses(
+        DOM.bpmDisplay,
         ['text-slate-500'],
         ['text-green-500', 'text-purple-500', 'text-amber-500']
     );
     
-    els.bpmDisplay.innerText = "--";
-    offCtx.clearRect(0, 0, 30, 30);
+    DOM.bpmDisplay.innerText = "--";
+    offCtx.clearRect(0, 0, CONSTANTS.CAMERA.PREVIEW_SIZE, CONSTANTS.CAMERA.PREVIEW_SIZE);
 
-    const modeCfg = modeConfig[newMode];
+    // Apply mode configuration
+    const modeCfg = ModeConfig[newMode];
     if (modeCfg) {
-        els.modeBadge.innerText = modeCfg.badge.text;
-        els.modeBadge.className = modeCfg.badge.class;
+        DOM.modeBadge.innerText = modeCfg.badge.text;
+        DOM.modeBadge.className = modeCfg.badge.class;
         
         if (modeCfg.camera) {
-            toggleClasses(els.cameraBtn, modeCfg.camera.bg, modeCfg.camera.rm);
+            UI.toggleClasses(DOM.cameraBtn, modeCfg.camera.bg, modeCfg.camera.rm);
         }
         
         if (modeCfg.simulate) {
-            toggleClasses(els.simulateBtn, modeCfg.simulate.bg, modeCfg.simulate.rm);
+            UI.toggleClasses(DOM.simulateBtn, modeCfg.simulate.bg, modeCfg.simulate.rm);
         }
     }
 
+    // Setup new mode
     if (newMode === 'idle') {
-        els.instructionOverlay.classList.remove('hidden');
-        releaseWakeLock();
+        DOM.instructionOverlay.classList.remove('hidden');
         
     } else if (newMode === 'camera') {
-        els.saveBtn.disabled = false;
-        await startCamera();
-        acquireWakeLock();
+        DOM.saveBtn.disabled = false;
+        AppState.startSession();
+        
+        try {
+            const { track, torchAvailable } = await Camera.start(DOM.video);
+            UI.updateCameraStats(track);
+            UI.showTorchWarning(!torchAvailable);
+            
+            const acquired = await WakeLock.acquire();
+            UI.updateWakeLockIndicator(acquired);
+        } catch(err) {
+            alert("Camera unavailable or permission denied.");
+            setMode('idle');
+        }
         
     } else if (newMode === 'simulate') {
-        els.simControls.classList.remove('hidden');
-        els.saveBtn.disabled = false;
-        acquireWakeLock();
+        DOM.simControls.classList.remove('hidden');
+        DOM.saveBtn.disabled = false;
+        AppState.startSession();
+        
+        const acquired = await WakeLock.acquire();
+        UI.updateWakeLockIndicator(acquired);
         
     } else if (newMode === 'review') {
-        toggleClasses(els.reviewControls, ['flex'], ['hidden']);
-        releaseWakeLock();
+        UI.toggleClasses(DOM.reviewControls, ['flex'], ['hidden']);
     }
 }
 
 // ============================================================================
-// Export Functions
+// SAVE & EXPORT
 // ============================================================================
+async function saveRecording() {
+    const historySnapshot = [...AppState.history];
+
+    if (historySnapshot.length < CONSTANTS.STORAGE.MIN_SAVE_LENGTH) {
+        if (!Config.autoSave) {
+            alert("Too short to save (minimum 1 second)");
+        }
+        return;
+    }
+
+    // Check storage quota
+    const quotaInfo = await Storage.getQuotaInfo();
+    if (quotaInfo) {
+        if (quotaInfo.usageRatio > CONSTANTS.STORAGE.QUOTA_CRITICAL) {
+            return alert("Storage full. Delete old recordings to continue.");
+        }
+        
+        if (quotaInfo.usageRatio > CONSTANTS.STORAGE.QUOTA_WARNING) {
+            alert(`Storage almost full (${(quotaInfo.usage/1024/1024).toFixed(1)}MB used). Consider deleting old recordings.`);
+        }
+    }
+    
+    try {
+        const recording = {
+            id: AppState.sessionId || Date.now(),
+            v: CONSTANTS.VERSION,
+            timestamp: AppState.sessionStartTime || new Date().toISOString(),
+            avgBpm: Math.round(BeatDetector.bpm) || '--',
+            duration: AppState.totalTime,
+            samples: historySnapshot.map(h => ({
+                t: h.time,
+                v: h.val
+            }))
+        };
+
+        await Storage.save(recording);
+        renderRecordingsList();
+        
+        DOM.saveBtn.innerText = "Saved";
+        setTimeout(() => DOM.saveBtn.innerText = "Save", 1500);
+        
+    } catch(e) {
+        console.error(e);
+        
+        if (e.name === 'QuotaExceededError') {
+            alert("Storage full. Please delete old recordings.");
+        } else if (!Config.autoSave) {
+            alert("Save failed");
+        }
+    }
+}
+
 function exportAllData() {
-    const raw = localStorage.getItem('hr_records');
-    if (!raw) return alert("No data");
+    const url = Storage.exportAll();
+    if (!url) return alert("No data");
     
-    const blob = new Blob([raw], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    
     a.href = url;
     a.download = `heart_rate_data_${Date.now()}.json`;
     document.body.appendChild(a);
@@ -711,8 +1389,17 @@ function exportAllData() {
 }
 
 function exportGraphImage() {
-    draw(state.mode === 'review' ? reviewData : state.history);
+    const data = AppState.mode === 'review' ? AppState.reviewData : AppState.history;
+    const viewStart = 0;
+    const viewEnd = AppState.mode === 'review' ? 
+        AppState.reviewOffset : data.length;
     
+    // Draw current view
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, DOM.canvas.width, DOM.canvas.height);
+    Renderer.drawSignal(DOM.canvas, ctx, data, AppState.mode, viewStart, viewEnd);
+    
+    // Add overlay info
     ctx.save();
     ctx.fillStyle = "#0f172a";
     ctx.fillRect(0, 0, 140, 60);
@@ -720,7 +1407,7 @@ function exportGraphImage() {
     ctx.fillStyle = '#f59e0b';
     ctx.font = 'bold 24px monospace';
     ctx.textAlign = 'left';
-    ctx.fillText(`${els.bpmDisplay.innerText} BPM`, 10, 30);
+    ctx.fillText(`${DOM.bpmDisplay.innerText} BPM`, 10, 30);
     
     ctx.fillStyle = '#94a3b8';
     ctx.font = '10px sans-serif';
@@ -728,392 +1415,26 @@ function exportGraphImage() {
     ctx.restore();
 
     const link = document.createElement('a');
-    link.download = `ecg_${Date.now()}.png`;
-    link.href = els.canvas.toDataURL('image/png');
+    link.download = `pulse_${Date.now()}.png`;
+    link.href = DOM.canvas.toDataURL('image/png');
     link.click();
-    
-    requestAnimationFrame(() => draw(state.mode === 'review' ? reviewData : state.history));
 }
 
 // ============================================================================
-// Camera Management
+// RECORDINGS LIST
 // ============================================================================
-async function startCamera() {
-    try {
-        const constraints = {
-            audio: false,
-            video: {
-                facingMode: 'environment',
-                width: { ideal: 320 },
-                height: { ideal: 240 },
-                frameRate: { ideal: 60, min: 30 }
-            }
-        };
-        
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        els.video.srcObject = stream;
-        
-        await new Promise(r => els.video.onloadedmetadata = r);
-        
-        const track = stream.getVideoTracks()[0];
-        await applyOptimizedConstraints(track);
-        await els.video.play();
-        
-        updateCameraStats(track);
-        
-    } catch (err) {
-        console.error("Camera Error:", err);
-        alert("Camera unavailable or permission denied.");
-        setMode('idle');
-    }
-}
-
-async function applyOptimizedConstraints(track) {
-    const caps = track.getCapabilities ? track.getCapabilities() : {};
-    const advanced = [];
-    const mainConstraints = {};
-
-    if (caps.torch) {
-        advanced.push({ torch: true });
+function renderRecordingsList() {
+    const records = Storage.loadAll();
+    
+    UI.updateStorageInfo();
+    
+    DOM.savedList.innerHTML = '';
+    
+    if (!records.length) {
+        return DOM.savedList.appendChild(DOM.emptyState);
     }
     
-    if (caps.focusMode && caps.focusMode.includes('continuous')) {
-        mainConstraints.focusMode = 'continuous';
-    }
-    
-    if (caps.whiteBalanceMode && caps.whiteBalanceMode.includes('single-shot')) {
-        mainConstraints.whiteBalanceMode = 'single-shot';
-    }
-    
-    if (caps.exposureCompensation) {
-        const minExp = caps.exposureCompensation.min || -2;
-        const maxExp = caps.exposureCompensation.max || 2;
-        mainConstraints.exposureCompensation = Math.max(minExp, Math.min(maxExp, -1.0));
-    }
-    
-    if (caps.iso && caps.iso.min) {
-        mainConstraints.iso = caps.iso.min;
-    }
-    
-    if (caps.frameRate && caps.frameRate.max >= 55) {
-        mainConstraints.frameRate = { ideal: 60 };
-    }
-
-    try {
-        await track.applyConstraints({ advanced, ...mainConstraints });
-        els.torchWarning.classList.add('hidden');
-        
-    } catch (e) {
-        console.warn('Could not apply advanced constraints:', e);
-        
-        if (caps.torch) {
-            try {
-                await track.applyConstraints({ advanced: [{ torch: true }] });
-                els.torchWarning.classList.add('hidden');
-            } catch(err) {
-                console.error('Torch unavailable:', err);
-                els.torchWarning.classList.remove('hidden');
-            }
-        } else {
-            els.torchWarning.classList.remove('hidden');
-        }
-    }
-}
-
-function updateCameraStats(track) {
-    const s = track.getSettings();
-    
-    els.statRes.innerText = `${s.width}x${s.height}`;
-    els.statFps.innerText = s.frameRate ? s.frameRate.toFixed(1) : '--';
-    els.statExp.innerText = s.exposureCompensation ? 
-        s.exposureCompensation : (s.exposureMode || '--');
-    els.statIso.innerText = s.iso || '--';
-}
-
-function stopCamera() {
-    if (stream) {
-        stream.getTracks().forEach(t => {
-            try {
-                t.applyConstraints({ advanced: [{ torch: false }] });
-            } catch(e) {
-                console.warn('Failed to turn off torch', e);
-            }
-            t.stop();
-        });
-        stream = null;
-    }
-    
-    if (els.video) {
-        els.video.pause();
-        els.video.srcObject = null;
-    }
-}
-
-// ============================================================================
-// Signal Processing
-// ============================================================================
-function normalizeSignal(val) {
-    state.recentValues.push(val);
-    
-    if (state.recentValues.length > 120) {
-        state.recentValues.shift();
-    }
-    
-    let min = -0.01;
-    let max = 0.01;
-    
-    for (let v of state.recentValues) {
-        if (v < min) min = v;
-        if (v > max) max = v;
-    }
-    
-    const targetGain = 0.7 / ((max - min) || 0.1);
-    state.currentGain = (state.currentGain * 0.95) + (targetGain * 0.05);
-    
-    let norm = val * state.currentGain;
-    els.debugGain.innerText = state.currentGain.toFixed(1);
-    
-    return Math.max(-0.6, Math.min(0.6, norm));
-}
-
-function processFrame() {
-    offCtx.drawImage(els.video, 0, 0, 30, 30);
-    const data = offCtx.getImageData(0, 0, 30, 30).data;
-    
-    let sum = 0;
-    let count = 0;
-    
-    for (let i = 0; i < data.length; i += 16) {
-        sum += data[i + 1];
-        count++;
-    }
-    
-    const avg = sum / count;
-    
-    els.saturationWarning.classList.toggle('hidden', avg <= 250);
-    
-    if (state.framesSinceStart < 30) {
-        state.signalMean = avg;
-        state.framesSinceStart++;
-        return 0;
-    }
-    
-    state.signalMean = (state.signalMean * 0.95) + (avg * 0.05);
-    
-    return normalizeSignal(state.signalMean - avg);
-}
-
-function generateSimulation(dt) {
-    const dur = 60 / state.simBpm;
-    state.simPhase += dt;
-    
-    if (state.simPhase > dur) {
-        state.simPhase -= dur;
-    }
-    
-    const t = state.simPhase / dur;
-    
-    const gaussian = (a, c, w) => {
-        return a * Math.exp(-Math.pow(t - c, 2) / (2 * w * w));
-    };
-    
-    let s = gaussian(1.0, 0.2, 0.08) + 
-            gaussian(0.3, 0.5, 0.12) + 
-            Math.sin(state.totalTime) * 0.1;
-    
-    return normalizeSignal(s * 0.05);
-}
-
-function processAlgo(val, time) {
-    algo.runningMax *= algo.decayRate;
-    algo.threshold = Math.max(algo.runningMax * 0.5, 0.05);
-    
-    if (val > algo.runningMax) {
-        algo.runningMax = val;
-    }
-    
-    let isBeat = false;
-    
-    if (val > algo.threshold && 
-        (time - algo.lastBeatTime) > algo.refractoryPeriod) {
-        
-        if (algo.runningMax > 0.15) {
-            algo.lastBeatTime = time;
-            isBeat = true;
-            
-            toggleClasses(els.beatIndicator, ['bg-red-500', 'scale-150']);
-            setTimeout(() => {
-                toggleClasses(els.beatIndicator, null, ['bg-red-500', 'scale-150']);
-            }, 100);
-            
-            algo.detectedBeats.push(time);
-            
-            const limit = cfg.bpmCalculationWindow;
-            while(algo.detectedBeats.length > limit) {
-                algo.detectedBeats.shift();
-            }
-
-            if (algo.detectedBeats.length >= 2) {
-                let sum = 0;
-                
-                for (let i = 1; i < algo.detectedBeats.length; i++) {
-                    sum += (algo.detectedBeats[i] - algo.detectedBeats[i-1]);
-                }
-                
-                let bpm = 60000 / (sum / (algo.detectedBeats.length - 1));
-                algo.bpm = algo.bpm === 0 ? bpm : (algo.bpm * 0.7 + bpm * 0.3);
-                algo.refractoryPeriod = Math.max(250, Math.min((60000 / algo.bpm) * 0.6, 1000));
-                
-                els.bpmDisplay.innerText = Math.round(algo.bpm);
-                
-                const colorClass = state.mode === 'camera' ? 
-                    "text-green-500" : "text-purple-500";
-                    
-                els.bpmDisplay.className = 
-                    "text-4xl font-mono font-bold tracking-tighter " + colorClass;
-            }
-        }
-    }
-    
-    return { isBeat, threshold: algo.threshold };
-}
-
-function updateHistory(time, val, thresh, beat, bpm) {
-    state.history.push({
-        time,
-        val,
-        threshold: thresh,
-        beat,
-        bpm
-    });
-    
-    if (state.history.length > 10800) {
-        state.history.shift();
-    }
-}
-
-// ============================================================================
-// Storage Management
-// ============================================================================
-async function saveRec() {
-    const historySnapshot = [...state.history];
-    const sessionIdSnapshot = session.id;
-    const startTimeSnapshot = session.startTime;
-    const bpmSnapshot = algo.bpm;
-    const totalTimeSnapshot = state.totalTime;
-
-    if (historySnapshot.length < 60) {
-        if (!cfg.autoSave) {
-            alert("Too short to save");
-        }
-        return;
-    }
-
-    if (navigator.storage && navigator.storage.estimate) {
-        try {
-            const estimate = await navigator.storage.estimate();
-            
-            if (estimate.quota > 0) {
-                const usageRatio = estimate.usage / estimate.quota;
-                
-                if (usageRatio > 0.95) {
-                    return alert("Storage full. Delete old recordings to continue.");
-                }
-                
-                if (usageRatio > 0.85) {
-                    alert(`Storage almost full (${(estimate.usage/1024/1024).toFixed(1)}MB used). Consider deleting old recordings.`);
-                }
-            }
-        } catch(e) {
-            console.warn("Quota check failed", e);
-        }
-    }
-    
-    try {
-        let recs = JSON.parse(localStorage.getItem('hr_records') || '[]');
-        
-        if (cfg.maxRecords > 0 && recs.length >= cfg.maxRecords) {
-            recs.splice(cfg.maxRecords - 1);
-        }
-
-        const existingIndex = recs.findIndex(r => r.id === sessionIdSnapshot);
-        
-        // Store samples with timestamps (v4 format)
-        const samples = historySnapshot.map(h => ({
-            t: h.time,
-            v: h.val
-        }));
-
-        const recordData = {
-            id: sessionIdSnapshot || Date.now(),
-            v: 4,  // New version with timestamps
-            timestamp: startTimeSnapshot || new Date().toISOString(),
-            avgBpm: Math.round(bpmSnapshot) || '--',
-            duration: totalTimeSnapshot,
-            samples
-        };
-
-        if (existingIndex >= 0) {
-            recs[existingIndex] = recordData;
-        } else {
-            recs.unshift(recordData);
-        }
-
-        localStorage.setItem('hr_records', JSON.stringify(recs));
-        renderList();
-        
-        els.saveBtn.innerText = "Saved";
-        setTimeout(() => els.saveBtn.innerText = "Save", 1500);
-        
-    } catch(e) {
-        console.error(e);
-        
-        if (e.name === 'QuotaExceededError') {
-            alert("Storage full. Please delete old recordings.");
-        } else if (!cfg.autoSave) {
-            alert("Save failed");
-        }
-    }
-}
-
-function renderList() {
-    let recs = JSON.parse(localStorage.getItem('hr_records') || '[]');
-    
-    const validRecs = recs.filter(r => {
-        // Only accept v4 format (with timestamps)
-        if (r.v === 4 && Array.isArray(r.samples)) {
-            return true;
-        }
-        console.log('Ignoring old format recording:', r.id, r.timestamp, 'version:', r.v);
-        return false;
-    });
-    
-    if (validRecs.length !== recs.length) {
-        recs = validRecs;
-        localStorage.setItem('hr_records', JSON.stringify(recs));
-    }
-
-    const jsonStr = JSON.stringify(recs);
-    const sizeMB = (new Blob([jsonStr]).size / 1024 / 1024).toFixed(2);
-    const sizeNum = parseFloat(sizeMB);
-    
-    els.storageInfo.innerText = `${sizeMB}MB / ~5MB`;
-    
-    if (sizeNum > 4.5) {
-        els.storageInfo.className = "text-[9px] font-mono text-rose-500 font-bold";
-    } else if (sizeNum > 3.5) {
-        els.storageInfo.className = "text-[9px] font-mono text-amber-500 font-bold";
-    } else {
-        els.storageInfo.className = "text-[9px] font-mono text-slate-600";
-    }
-    
-    els.savedList.innerHTML = '';
-    
-    if (!recs.length) {
-        return els.savedList.appendChild(els.emptyState);
-    }
-    
-    recs.forEach(r => {
+    records.forEach(r => {
         const d = new Date(r.timestamp);
         const div = document.createElement('div');
         
@@ -1139,221 +1460,153 @@ function renderList() {
         
         div.onclick = (e) => {
             if (e.target.classList.contains('del')) {
-                localStorage.setItem(
-                    'hr_records',
-                    JSON.stringify(recs.filter(x => x.id !== r.id))
-                );
-                renderList();
+                Storage.delete(r.id);
+                renderRecordingsList();
             } else {
-                setMode('review');
-                
-                const values = r.samples.map(s => s.v);
-                const timestamps = r.samples.map(s => s.t);
-                
-                const thresholds = calculateThreshold(values);
-                const beatIndices = detectBeats(values, thresholds);
-                const calculatedBpm = calculateBPM(
-                    beatIndices,
-                    values,
-                    timestamps,
-                    cfg.bpmCalculationWindow
-                );
-
-                reviewData = r.samples.map((sample, i) => ({
-                    time: sample.t,
-                    val: sample.v,
-                    threshold: thresholds[i].threshold,
-                    beat: beatIndices.includes(i),
-                    bpm: calculatedBpm || r.avgBpm
-                }));
-                
-                reviewData.duration = r.duration;
-                
-                els.historySlider.min = 0;
-                els.historySlider.max = r.samples.length;
-                els.historySlider.value = r.samples.length;
-                
-                state.reviewOffset = r.samples.length;
-                
-                els.bpmDisplay.innerText = calculatedBpm || r.avgBpm;
-                els.bpmDisplay.className = 
-                    "text-4xl font-mono font-bold text-amber-500 tracking-tighter";
-                
-                draw(reviewData);
+                openReview(r);
             }
         };
         
-        els.savedList.appendChild(div);
+        DOM.savedList.appendChild(div);
     });
 }
 
-// ============================================================================
-// Animation Loop
-// ============================================================================
-async function loop(t) {
-    if (!state.lastTime) state.lastTime = t;
+function openReview(recording) {
+    setMode('review');
     
-    const dt = (t - state.lastTime) / 1000;
-    state.lastTime = t;
+    const values = recording.samples.map(s => s.v);
+    const timestamps = recording.samples.map(s => s.t);
+    
+    const thresholds = BeatDetector.calculateThreshold(values);
+    const beatIndices = BeatDetector.detectBeats(values, thresholds);
+    const calculatedBpm = BeatDetector.calculateBPM(
+        beatIndices,
+        timestamps,
+        Config.bpmCalculationWindow
+    );
 
-    if (state.mode === 'camera' || state.mode === 'simulate') {
-        state.totalTime += dt;
+    AppState.reviewData = recording.samples.map((sample, i) => ({
+        time: sample.t,
+        val: sample.v,
+        threshold: thresholds[i].threshold,
+        beat: beatIndices.includes(i),
+        bpm: calculatedBpm || recording.avgBpm
+    }));
+    
+    AppState.reviewData.duration = recording.duration;
+    
+    DOM.historySlider.min = 0;
+    DOM.historySlider.max = recording.samples.length;
+    DOM.historySlider.value = recording.samples.length;
+    
+    AppState.reviewOffset = recording.samples.length;
+    
+    UI.updateBPMDisplay(calculatedBpm || recording.avgBpm, "text-amber-500");
+}
+
+// ============================================================================
+// ANIMATION LOOP
+// ============================================================================
+async function loop(timestamp) {
+    if (!AppState.lastTime) AppState.lastTime = timestamp;
+    
+    const dt = (timestamp - AppState.lastTime) / 1000;
+    AppState.lastTime = timestamp;
+
+    if (AppState.mode === 'camera' || AppState.mode === 'simulate') {
+        AppState.totalTime += dt;
         
-        if (cfg.autoStopSeconds > 0 && state.totalTime >= cfg.autoStopSeconds) {
+        // Check auto-stop
+        if (Config.autoStopSeconds > 0 && AppState.totalTime >= Config.autoStopSeconds) {
             await setMode('idle');
         } else {
-            let s = state.mode === 'camera' ? 
-                processFrame() : generateSimulation(dt);
-                
-            const res = processAlgo(s, t);
-            updateHistory(state.totalTime, s, res.threshold, res.isBeat, Math.round(algo.bpm));
+            let signal, isSaturated;
+            
+            if (AppState.mode === 'camera') {
+                const result = SignalProcessor.processFrame(DOM.video, offCtx);
+                signal = result.signal;
+                isSaturated = result.isSaturated;
+                UI.showSaturationWarning(isSaturated);
+            } else {
+                AppState.simPhase += dt;
+                signal = SignalProcessor.generateSimulation(
+                    AppState.simPhase,
+                    AppState.simBpm,
+                    AppState.totalTime
+                );
+            }
+            
+            const result = BeatDetector.process(signal, timestamp, Config.bpmCalculationWindow);
+            
+            if (result.isBeat) {
+                UI.flashBeatIndicator();
+            }
+            
+            if (result.bpm > 0) {
+                const colorClass = AppState.mode === 'camera' ? 
+                    "text-green-500" : "text-purple-500";
+                UI.updateBPMDisplay(result.bpm, colorClass);
+            }
+            
+            UI.updateGainDisplay(SignalProcessor.currentGain);
+            
+            AppState.addHistoryPoint(
+                AppState.totalTime,
+                signal,
+                result.threshold,
+                result.isBeat,
+                result.bpm
+            );
         }
     }
     
-    draw(state.mode === 'review' ? reviewData : state.history);
+    // Draw
+    const data = AppState.mode === 'review' ? AppState.reviewData : AppState.history;
+    if (data && data.length > 0) {
+        const end = AppState.mode === 'review' ? AppState.reviewOffset : data.length;
+        const start = Math.max(0, end - DOM.canvas.width);
+        
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, DOM.canvas.width, DOM.canvas.height);
+        
+        Renderer.drawSignal(DOM.canvas, ctx, data, AppState.mode, start, end);
+        
+        // Update review time display
+        if (AppState.mode === 'review' && end > 0 && data[end - 1]) {
+            const currentTime = data[end - 1].time;
+            const totalTime = data[data.length - 1].time;
+            const timeFromEnd = totalTime - currentTime;
+            DOM.reviewTimeDisplay.innerText = `-${timeFromEnd.toFixed(1)}s`;
+            
+            // Recalculate BPM for current position
+            const values = data.slice(0, end).map(d => d.val);
+            const timestamps = data.slice(0, end).map(d => d.time);
+            const thresholds = BeatDetector.calculateThreshold(values);
+            const beatIndices = BeatDetector.detectBeats(values, thresholds);
+            const displayBpm = BeatDetector.calculateBPM(
+                beatIndices,
+                timestamps,
+                Config.bpmCalculationWindow
+            );
+            
+            if (displayBpm) {
+                UI.updateBPMDisplay(displayBpm, "text-amber-500");
+            }
+        }
+    }
     
     animationFrameId = requestAnimationFrame(loop);
 }
 
 // ============================================================================
-// Drawing Function
-// ============================================================================
-function draw(dataSource) {
-    const data = dataSource || [];
-    
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, 0, els.canvas.width, els.canvas.height);
-    
-    if (!data.length) return;
-    
-    let end = state.mode === 'review' ? state.reviewOffset : data.length;
-    let start = Math.max(0, end - els.canvas.width);
-    
-    if (state.mode === 'review') {
-        // Use actual timestamps for review display
-        if (end > 0 && data[end - 1]) {
-            const currentTime = data[end - 1].time;
-            const totalTime = data[data.length - 1].time;
-            const timeFromEnd = totalTime - currentTime;
-            els.reviewTimeDisplay.innerText = `-${timeFromEnd.toFixed(1)}s`;
-            
-            // Recalculate BPM based on visible window
-            const values = data.slice(0, end).map(d => d.val);
-            const timestamps = data.slice(0, end).map(d => d.time);
-            const thresholds = calculateThreshold(values);
-            const beatIndices = detectBeats(values, thresholds);
-            const displayBpm = calculateBPM(
-                beatIndices,
-                values,
-                timestamps,
-                cfg.bpmCalculationWindow
-            );
-            
-            if (displayBpm) {
-                els.bpmDisplay.innerText = displayBpm;
-            }
-        }
-    }
-
-    const viewData = data.slice(start, end);
-    if (!viewData.length) return;
-
-    const cy = els.canvas.height / 2;
-    const sy = els.canvas.height / 2.2;
-    const my = v => cy - v * sy;
-
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    ctx.font = "9px monospace";
-
-    // Draw grid lines using actual timestamps
-    for (let i = 0; i < viewData.length; i++) {
-        const currentTime = viewData[i].time;
-        const prevTime = i > 0 ? viewData[i - 1].time : currentTime;
-        
-        // 200ms grid (5Hz)
-        if (Math.floor(currentTime * 5) !== Math.floor(prevTime * 5)) {
-            ctx.beginPath();
-            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-            ctx.moveTo(i, 0);
-            ctx.lineTo(i, els.canvas.height);
-            ctx.stroke();
-        }
-
-        // 1 second grid
-        if (Math.floor(currentTime) !== Math.floor(prevTime)) {
-            ctx.beginPath();
-            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-            ctx.moveTo(i, 0);
-            ctx.lineTo(i, els.canvas.height);
-            ctx.stroke();
-            
-            ctx.fillStyle = 'rgba(255,255,255,0.3)';
-            ctx.fillText(Math.floor(currentTime) + 's', i, els.canvas.height - 2);
-        }
-    }
-
-    // Draw threshold line
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(255,200,0,0.3)';
-    ctx.setLineDash([4, 4]);
-    
-    viewData.forEach((d, i) => {
-        if (i === 0) {
-            ctx.moveTo(i, my(d.threshold));
-        } else {
-            ctx.lineTo(i, my(d.threshold));
-        }
-    });
-    
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Draw signal
-    const color = state.mode === 'simulate' ? '#a855f7' :
-                  (state.mode === 'review' ? '#f59e0b' : '#ef4444');
-    
-    ctx.beginPath();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    
-    viewData.forEach((d, i) => {
-        if (i === 0) {
-            ctx.moveTo(i, my(d.val));
-        } else {
-            ctx.lineTo(i, my(d.val));
-        }
-    });
-    
-    ctx.stroke();
-
-    // Fill area under signal
-    ctx.lineTo(viewData.length - 1, els.canvas.height);
-    ctx.lineTo(0, els.canvas.height);
-    ctx.fillStyle = color + "20";
-    ctx.fill();
-
-    // Draw beat markers
-    ctx.fillStyle = "#fff";
-    
-    viewData.forEach((d, i) => {
-        if (d.beat) {
-            ctx.beginPath();
-            ctx.arc(i, my(d.val), 3, 0, Math.PI * 2);
-            ctx.fill();
-        }
-    });
-}
-
-// ============================================================================
-// Modal Functions
+// MODAL MANAGEMENT
 // ============================================================================
 function openSettings() {
-    els.settingsModal.classList.remove('hidden');
+    DOM.settingsModal.classList.remove('hidden');
     
     setTimeout(() => {
-        toggleClasses(
-            els.settingsContent,
+        UI.toggleClasses(
+            DOM.settingsContent,
             ['scale-100', 'opacity-100'],
             ['scale-95', 'opacity-0']
         );
@@ -1363,63 +1616,55 @@ function openSettings() {
 function closeSettings() {
     saveSettings();
     
-    toggleClasses(
-        els.settingsContent,
+    UI.toggleClasses(
+        DOM.settingsContent,
         ['scale-95', 'opacity-0'],
         ['scale-100', 'opacity-100']
     );
     
-    setTimeout(() => els.settingsModal.classList.add('hidden'), 200);
+    setTimeout(() => DOM.settingsModal.classList.add('hidden'), 200);
 }
 
 // ============================================================================
-// Event Listeners
+// EVENT LISTENERS
 // ============================================================================
-els.historySlider.addEventListener('input', e => {
-    state.reviewOffset = parseInt(e.target.value);
+DOM.historySlider.addEventListener('input', e => {
+    AppState.reviewOffset = parseInt(e.target.value);
 });
 
-els.bpmSlider.addEventListener('input', e => {
-    state.simBpm = parseInt(e.target.value);
-    els.targetBpmValue.innerText = state.simBpm;
+DOM.bpmSlider.addEventListener('input', e => {
+    AppState.simBpm = parseInt(e.target.value);
+    DOM.targetBpmValue.innerText = AppState.simBpm;
 });
 
-els.cameraBtn.onclick = () => {
-    setMode(state.mode === 'camera' ? 'idle' : 'camera');
+DOM.cameraBtn.onclick = () => {
+    setMode(AppState.mode === 'camera' ? 'idle' : 'camera');
 };
 
-els.simulateBtn.onclick = () => {
-    setMode(state.mode === 'simulate' ? 'idle' : 'simulate');
+DOM.simulateBtn.onclick = () => {
+    setMode(AppState.mode === 'simulate' ? 'idle' : 'simulate');
 };
 
-els.saveBtn.onclick = saveRec;
-els.backToLiveBtn.onclick = () => setMode('idle');
-els.exportJsonBtn.onclick = exportAllData;
-els.exportImgBtn.onclick = exportGraphImage;
-els.settingsBtn.onclick = openSettings;
-els.closeSettingsBtn.onclick = closeSettings;
+DOM.saveBtn.onclick = saveRecording;
+DOM.backToLiveBtn.onclick = () => setMode('idle');
+DOM.exportJsonBtn.onclick = exportAllData;
+DOM.exportImgBtn.onclick = exportGraphImage;
+DOM.settingsBtn.onclick = openSettings;
+DOM.closeSettingsBtn.onclick = closeSettings;
 
-els.settingsModal.onclick = (e) => {
-    if (e.target === els.settingsModal) {
+DOM.settingsModal.onclick = (e) => {
+    if (e.target === DOM.settingsModal) {
         closeSettings();
     }
 };
 
-els.deleteOldestBtn.onclick = () => {
-    try {
-        let recs = JSON.parse(localStorage.getItem('hr_records') || '[]');
-        
-        if (recs.length === 0) {
-            return alert("No records to delete");
-        }
-        
-        recs.splice(recs.length - 10, 10);
-        localStorage.setItem('hr_records', JSON.stringify(recs));
-        renderList();
-        alert("Deleted oldest records");
-        
-    } catch(e) {
-        console.error(e);
+DOM.deleteOldestBtn.onclick = () => {
+    const deleted = Storage.deleteOldest();
+    if (deleted === 0) {
+        alert("No records to delete");
+    } else {
+        renderRecordingsList();
+        alert(`Deleted ${deleted} oldest record(s)`);
     }
 };
 
@@ -1427,20 +1672,21 @@ document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         cancelAnimationFrame(animationFrameId);
         
-        if (state.mode === 'camera') {
-            stopCamera();
-            releaseWakeLock();
+        if (AppState.mode === 'camera') {
+            Camera.stop();
+            WakeLock.release();
+            UI.updateWakeLockIndicator(false);
             
-            state.mode = 'idle';
-            els.modeBadge.innerText = "PAUSED";
-            els.modeBadge.className = 
+            AppState.mode = 'idle';
+            DOM.modeBadge.innerText = "PAUSED";
+            DOM.modeBadge.className = 
                 "text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 border border-amber-700 text-amber-300 font-bold uppercase";
             
-            els.saveBtn.disabled = false;
-            els.saveBtn.innerText = "Save Partial";
+            DOM.saveBtn.disabled = false;
+            DOM.saveBtn.innerText = "Save Partial";
             
-            toggleClasses(
-                els.cameraBtn,
+            UI.toggleClasses(
+                DOM.cameraBtn,
                 ['bg-sky-600', 'hover:bg-sky-500'],
                 ['bg-rose-600', 'hover:bg-rose-500']
             );
@@ -1450,13 +1696,16 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
-window.onpagehide = stopCamera;
+window.onpagehide = () => {
+    Camera.stop();
+    WakeLock.release();
+};
 
 // ============================================================================
-// Initialization
+// INITIALIZATION
 // ============================================================================
 loadSettings();
-renderList();
+renderRecordingsList();
 loop(performance.now());
 
 </script>
