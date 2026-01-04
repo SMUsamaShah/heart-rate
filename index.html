@@ -14,302 +14,511 @@
     <link rel="apple-touch-icon" id="dynamic-apple-icon">
     <link rel="manifest" id="dynamic-manifest">
 
-    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         :root {
-            --slate-900: #0f172a;
-            --slate-800: #1e293b;
-            --slate-700: #334155;
-            --slate-600: #475569;
-            --slate-500: #64748b;
-            --slate-400: #94a3b8;
-            --slate-200: #e2e8f0;
-            --sky-400: #38bdf8;
-            --sky-500: #0ea5e9;
-            --sky-600: #0284c7;
-            --purple-500: #a855f7;
-            --purple-600: #9333ea;
-            --red-500: #ef4444;
-            --amber-500: #f59e0b;
-            --rose-500: #f43f5e;
+            --bg-dark: #0f172a;
+            --bg-medium: #1e293b;
+            --bg-light: #334155;
+            --text-color: #e2e8f0;
+            --text-muted: #94a3b8;
+            --primary: #0ea5e9;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
         }
+        
         body {
-            background-color: var(--slate-900);
-            color: var(--slate-200);
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            overflow: hidden; 
-            touch-action: none; 
-            -webkit-user-select: none;
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-dark);
+            color: var(--text-color);
+            font-family: system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+            touch-action: none;
             user-select: none;
         }
-        canvas { 
-            display: block; 
-            width: 100%; 
-            height: 100%; 
-        }
-        .pixelated { 
-            image-rendering: pixelated; 
-            image-rendering: -moz-crisp-edges; 
-            image-rendering: crisp-edges; 
-        }
-        .hidden-vid { 
-            display: none; 
-        }
-        .scroller::-webkit-scrollbar { 
-            width: 4px; 
-        }
-        .scroller::-webkit-scrollbar-track { 
-            background: rgba(30, 41, 59, 0.3); 
-        }
-        .scroller::-webkit-scrollbar-thumb { 
-            background: var(--slate-600); 
-            border-radius: 2px; 
-        }
-        .control-panel {
+        
+        header {
+            padding: 8px 16px;
+            background: rgba(15, 23, 42, 0.8);
+            border-bottom: 1px solid #334155;
             backdrop-filter: blur(12px);
-            background-color: rgba(15, 23, 42, 0.92);
+        }
+        
+        #canvasContainer {
+            flex: 1;
+            position: relative;
+            background: black;
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .canvas-preview {
+            width: 32px;
+            height: 32px;
+            border: 1px solid #475569;
+            background: black;
+            image-rendering: pixelated;
+        }
+        
+        video {
+            display: none;
+        }
+        
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #334155;
+            background: rgba(30, 41, 59, 0.5);
+        }
+        
+        .tab {
+            flex: 1;
+            padding: 12px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+        
+        .tab.active {
+            background: var(--bg-light);
+            color: var(--primary);
+            border-bottom: 2px solid var(--primary);
+        }
+        
+        .tab-content {
+            display: none;
+            padding: 16px;
+            overflow-y: auto;
+            height: calc(45vh - 48px);
+            min-height: 212px;
+        }
+        
+        .tab-content:not(.hidden) {
+            display: block;
+        }
+        
+        .storage-bar {
+            height: 100%;
+            background: #0ea5e9;
+            transition: width 0.3s;
+        }
+        
+        .storage-bar.warning {
+            background: #f59e0b;
+        }
+        
+        .storage-bar.critical {
+            background: #ef4444;
+        }
+        
+        .controls {
+            height: 45vh;
+            min-height: 260px;
+            background: rgba(15, 23, 42, 0.92);
+            border-top: 1px solid #334155;
+            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
             padding-bottom: env(safe-area-inset-bottom);
         }
-        input[type=range].scrubber {
-            -webkit-appearance: none; 
-            background: transparent;
+        
+        .btn-group {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
         }
-        input[type=range].scrubber::-webkit-slider-runnable-track {
-            height: 6px; 
-            background: var(--slate-700); 
+        
+        button {
+            padding: 12px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        #cameraBtn { background: #0ea5e9; color: white; }
+        #simulateBtn { background: #a855f7; color: white; }
+        #saveBtn { background: #10b981; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        
+        input[type="range"] {
+            width: 100%;
+            margin: 8px 0;
+        }
+        
+        input[type="range"].scrubber {
+            appearance: none;
+            background: transparent;
+            height: 20px;
+        }
+        
+        input[type="range"].scrubber::-webkit-slider-runnable-track {
+            height: 6px;
+            background: #334155;
             border-radius: 3px;
         }
-        input[type=range].scrubber::-webkit-slider-thumb {
-            -webkit-appearance: none; 
-            height: 18px; 
+        
+        input[type="range"].scrubber::-webkit-slider-thumb {
+            appearance: none;
             width: 18px;
-            border-radius: 50%; 
-            background: var(--sky-400); 
+            height: 18px;
+            border-radius: 50%;
+            background: #38bdf8;
             margin-top: -6px;
-            cursor: pointer; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            cursor: pointer;
         }
-        .toggle-checkbox:checked { 
-            right: 0; 
-            border-color: var(--sky-400); 
+        
+        .recordings {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
-        .toggle-checkbox:checked + .toggle-label { 
-            background-color: var(--sky-400); 
+        
+        .recording-item {
+            padding: 12px;
+            background: var(--bg-medium);
+            border: 1px solid var(--bg-light);
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-        .tab-btn.active {
-            background-color: var(--slate-700);
-            color: var(--sky-400);
-            border-bottom: 2px solid var(--sky-400);
+        
+        .recording-item:hover {
+            background: var(--bg-light);
+        }
+        
+        .delete-btn {
+            padding: 4px 8px;
+            background: none;
+            color: #64748b;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+        }
+        
+        .delete-btn:hover {
+            color: var(--danger);
+        }
+        
+        .overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.6);
+            pointer-events: none;
+        }
+        
+        .review-controls {
+            display: none;
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            right: 16px;
+            padding: 16px;
+            background: rgba(30, 41, 59, 0.95);
+            border: 1px solid #475569;
+            border-radius: 8px;
+            backdrop-filter: blur(12px);
+        }
+        
+        .review-controls.active {
+            display: block;
+        }
+        
+        .hidden { display: none; }
+        
+        .warning {
+            position: absolute;
+            top: 16px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            pointer-events: none;
+        }
+        
+        .warning span {
+            display: inline-block;
+            padding: 4px 12px;
+            background: rgba(127, 29, 29, 0.9);
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+            border: 1px solid var(--danger);
+            border-radius: 12px;
+        }
+        
+        .scroller::-webkit-scrollbar {
+            width: 4px;
+        }
+        
+        .scroller::-webkit-scrollbar-track {
+            background: rgba(30, 41, 59, 0.3);
+        }
+        
+        .scroller::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 2px;
+        }
+        
+        .toggle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+        }
+        
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+        }
+        
+        .setting-row input[type="number"] {
+            width: 64px;
+            padding: 4px;
+            background: var(--bg-dark);
+            border: 1px solid var(--bg-light);
+            border-radius: 4px;
+            color: var(--text-color);
+            text-align: center;
+        }
+        
+        small {
+            display: block;
+            font-size: 10px;
+            color: #64748b;
+        }
+        
+        .camera-stats {
+            border-top: 1px solid var(--bg-light);
+            padding-top: 12px;
+            margin-top: 12px;
+        }
+        
+        .camera-stats h4 {
+            font-size: 10px;
+            font-weight: bold;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+        
+        .camera-stats > div {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-family: monospace;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        
+        .camera-stats > div > div {
+            background: var(--bg-dark);
+            padding: 6px;
+            border-radius: 4px;
+        }
+        
+        .camera-stats span {
+            color: var(--text-color);
+        }
+        
+        .version {
+            text-align: center;
+            padding-top: 12px;
+            font-family: monospace;
+            font-size: 10px;
+            color: #475569;
+        }
+        
+        
+        .toggle-checkbox {
+            position: relative;
+            width: 40px;
+            height: 20px;
+            appearance: none;
+            background: #475569;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        
+        .toggle-checkbox:checked {
+            background: var(--primary);
+        }
+        
+        .toggle-checkbox::before {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: white;
+            top: 2px;
+            left: 2px;
+            transition: left 0.2s;
+        }
+        
+        .toggle-checkbox:checked::before {
+            left: 22px;
         }
     </style>
 </head>
-<body class="h-screen w-screen flex flex-col">
+<body>
 
-    <div class="flex-none pt-safe-top px-4 pb-2 flex justify-between items-center bg-slate-900/80 border-b border-slate-700/50 z-10 backdrop-blur-md">
-        <div class="flex flex-col pt-2">
-            <span class="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Heart Rate</span>
-            <div class="flex items-baseline gap-2">
-                <span id="bpmDisplay" class="text-4xl font-mono font-bold text-slate-500 tracking-tighter">--</span>
-                <span id="modeBadge" class="hidden text-[10px] px-1.5 py-0.5 rounded bg-sky-900/50 border border-sky-700 text-sky-300 font-bold uppercase"></span>
+    <header>
+        <div>
+            <small>HEART RATE</small>
+            <div>
+                <span id="bpmDisplay" style="font-size: 2em; font-family: monospace;">--</span>
+                <span id="modeBadge" class="hidden"></span>
             </div>
         </div>
-        
-        <div class="pt-2">
-            <canvas id="previewCanvas" width="30" height="30" class="w-8 h-8 rounded border border-slate-600 bg-black hidden pixelated"></canvas>
-        </div>
-    </div>
+        <canvas id="previewCanvas" width="30" height="30" class="canvas-preview hidden"></canvas>
+    </header>
 
-    <div class="flex-grow relative bg-black overflow-hidden" id="canvasContainer">
+    <div id="canvasContainer">
         <canvas id="ppgCanvas"></canvas>
-        <video id="videoElement" playsinline class="hidden-vid"></video>
+        <video id="videoElement" playsinline></video>
         
-        <div id="instructionOverlay" class="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/60 z-10">
-            <div class="text-center p-6 max-w-sm">
-                <div class="text-slate-200 font-bold text-lg mb-2">Ready to Measure</div>
-                <p class="text-slate-400 text-sm">Go to the Record tab to start.</p>
-                <div class="mt-4 text-xs text-slate-500 border border-slate-700 rounded p-2 bg-slate-900/50">
-                    <span class="font-bold text-sky-400">Camera Mode:</span> Cover the back camera & flash gently with your fingertip.
-                </div>
+        <div id="instructionOverlay" class="overlay">
+            <div>
+                <p><strong>Ready to Measure</strong></p>
+                <p>Go to the Record tab to start.</p>
+                <p><small><strong>Camera Mode:</strong> Cover the back camera & flash gently with your fingertip.</small></p>
             </div>
         </div>
 
-        <div id="saturationWarning" class="hidden absolute top-4 left-0 right-0 text-center pointer-events-none">
-            <span class="bg-rose-900/90 text-white text-[10px] font-bold px-3 py-1 rounded-full border border-rose-500 shadow-lg">⚠️ SIGNAL CLIPPING - Move finger slightly</span>
+        <div id="saturationWarning" class="warning hidden">
+            <span>⚠️ SIGNAL CLIPPING - Move finger slightly</span>
         </div>
         
-        <div id="torchWarning" class="hidden absolute top-12 left-0 right-0 text-center pointer-events-none">
-            <span class="bg-amber-900/90 text-white text-[10px] font-bold px-3 py-1 rounded-full border border-amber-500 shadow-lg">⚠️ Camera flash unavailable - Ensure good lighting</span>
+        <div id="torchWarning" class="warning hidden" style="top: 48px;">
+            <span>⚠️ Camera flash unavailable - Ensure good lighting</span>
         </div>
 
-        <div class="absolute bottom-2 right-2 text-[9px] font-mono text-slate-600 pointer-events-none hidden sm:block">
-            Gain: <span id="debugGain">1.0</span>x
-        </div>
-
-        <div id="reviewControls" class="absolute bottom-4 left-4 right-4 bg-slate-800/95 p-4 rounded-xl border border-slate-600/50 hidden flex-col gap-3 z-20 shadow-2xl backdrop-blur-xl">
-            <div class="flex justify-between text-xs text-slate-300 font-bold">
+        <div id="reviewControls" class="review-controls">
+            <div>
                 <span>Timeline</span>
-                <span id="reviewTimeDisplay" class="font-mono text-sky-400">Live</span>
+                <span id="reviewTimeDisplay">Live</span>
             </div>
-            <input type="range" id="historySlider" min="0" max="100" value="100" class="w-full scrubber accent-sky-500">
-            <div class="grid grid-cols-2 gap-3 mt-1">
-                <button id="exportImgBtn" class="py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-semibold rounded-lg text-xs border border-slate-600">
-                    Save Graph Img
-                </button>
-                <button id="backToLiveBtn" class="py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg text-xs shadow-lg shadow-sky-900/20">
-                    Done
-                </button>
+            <input type="range" id="historySlider" min="0" max="100" value="100" class="scrubber">
+            <div class="btn-group">
+                <button id="exportImgBtn">Save Graph Img</button>
+                <button id="backToLiveBtn">Done</button>
             </div>
         </div>
     </div>
 
-    <!-- TABBED BOTTOM PANEL -->
-    <div class="flex-none flex flex-col h-[45vh] min-h-[260px] control-panel border-t border-slate-700/50 z-20">
-        <!-- Tab Navigation -->
-        <div class="flex border-b border-slate-700/50 bg-slate-800/50">
-            <button id="tabRecord" class="tab-btn active flex-1 py-3 text-sm font-bold text-slate-400 hover:text-white">
-                Record
-            </button>
-            <button id="tabHistory" class="tab-btn flex-1 py-3 text-sm font-bold text-slate-400 hover:text-white">
-                History
-            </button>
-            <button id="tabSettings" class="tab-btn flex-1 py-3 text-sm font-bold text-slate-400 hover:text-white">
-                Settings
-            </button>
+    <div class="controls">
+        <div class="tabs">
+            <button id="tabRecord" class="tab active">Record</button>
+            <button id="tabHistory" class="tab">History</button>
+            <button id="tabSettings" class="tab">Settings</button>
         </div>
 
-        <!-- Tab Content Container -->
-        <div class="flex-grow overflow-hidden">
+        <div id="contentRecord" class="tab-content scroller">
+            <div class="btn-group">
+                <button id="cameraBtn">Camera</button>
+                <button id="simulateBtn">Simulate</button>
+                <button id="saveBtn">Save</button>
+            </div>
             
-            <!-- RECORD TAB -->
-            <div id="contentRecord" class="h-full flex flex-col p-4 gap-3">
-                <div class="grid grid-cols-3 gap-2">
-                    <button id="cameraBtn" class="h-12 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-lg shadow-lg shadow-sky-900/20 text-xs">
-                        Camera                    
-                    </button>
-                    <button id="simulateBtn" class="h-12 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg shadow-purple-900/20 text-xs">
-                        Simulate
-                    </button>
-                    <button id="saveBtn" class="h-12 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-lg border border-slate-600 text-xs disabled:opacity-40" disabled>
-                        Save
-                    </button>
-                </div>
-                
-                <div id="simControls" class="hidden bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
-                    <div class="flex justify-between items-center mb-1">
-                        <label class="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Sim Rate</label>
-                        <span id="targetBpmValue" class="text-[10px] font-mono bg-purple-900/50 text-purple-200 px-1.5 py-0.5 rounded">75</span>
-                    </div>
-                    <input type="range" id="bpmSlider" min="40" max="220" value="75" class="w-full h-1.5 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-purple-500">
-                </div>
+            <div id="simControls" class="hidden">
+                <label>Target BPM: <span id="targetBpmValue">75</span></label>
+                <input type="range" id="bpmSlider" min="40" max="220" value="75">
+            </div>
+        </div>
 
-                <div class="flex-grow flex items-center justify-center text-center p-4">
-                    <div class="text-slate-500 text-sm">
-                        <div class="mb-2">Select a recording mode above</div>
-                        <div class="text-xs text-slate-600">
-                            Camera for real measurements<br>
-                            Simulate for testing
-                        </div>
-                    </div>
+        <div id="contentHistory" class="tab-content scroller hidden">
+            <div style="padding: 12px; border-bottom: 1px solid #334155; background: rgba(30, 41, 59, 0.3); margin: -16px -16px 16px -16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 10px; font-weight: bold; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">Storage</span>
+                    <span id="storageInfo" style="font-size: 10px; font-family: monospace; color: #64748b;">--</span>
+                </div>
+                <div style="width: 100%; background: #334155; border-radius: 9999px; height: 8px; overflow: hidden;">
+                    <div id="storageBar" class="storage-bar" style="width: 0%"></div>
                 </div>
             </div>
 
-            <!-- HISTORY TAB -->
-            <div id="contentHistory" class="hidden h-full flex flex-col">
-                <div class="p-3 border-b border-slate-700/50 bg-slate-800/30">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Storage</span>
-                        <span id="storageInfo" class="text-[10px] font-mono text-slate-500">--</span>
-                    </div>
-                    <div class="w-full bg-slate-700 rounded-full h-2 overflow-hidden">
-                        <div id="storageBar" class="bg-sky-500 h-full" style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <div class="px-3 py-2 bg-slate-800/50 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex justify-between items-center">
-                    <span id="recordCount">0 Recordings</span>
-                    <div class="flex gap-2">
-                        <button id="deleteOldestBtn" class="text-rose-400 hover:text-white p-1">
-                            Del Oldest
-                        </button>
-                        <button id="exportJsonBtn" class="text-sky-400 hover:text-white p-1">
-                            Export All ⬇
-                        </button>
-                    </div>
-                </div>
-
-                <div id="savedListContainer" class="flex-grow overflow-y-auto scroller p-2 space-y-1.5 pb-safe-bottom">
-                    <div class="text-center text-slate-600 text-sm py-12" id="emptyState">
-                        <div class="mb-2">No recordings yet</div>
-                        <div class="text-xs text-slate-700">Start recording in the Record tab</div>
-                    </div>
+            <div style="padding: 8px 12px; background: rgba(30, 41, 59, 0.5); font-size: 10px; font-weight: bold; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items: center; margin: -16px -16px 12px -16px;">
+                <span id="recordCount">0 Recordings</span>
+                <div style="display: flex; gap: 8px;">
+                    <button id="deleteOldestBtn" style="color: #f87171; padding: 4px; background: none; border: none; cursor: pointer; font-size: 10px;">Del Oldest</button>
+                    <button id="exportJsonBtn" style="color: #38bdf8; padding: 4px; background: none; border: none; cursor: pointer; font-size: 10px;">Export All ⬇</button>
                 </div>
             </div>
 
-            <!-- SETTINGS TAB -->
-            <div id="contentSettings" class="hidden h-full overflow-y-auto scroller p-4 space-y-4 pb-safe-bottom">
-                <div class="flex items-center justify-between">
-                    <label class="text-sm text-slate-300">Camera Preview</label>
-                    <div class="relative inline-block w-10 mr-2 align-middle select-none">
-                        <input type="checkbox" id="settingPreview" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
-                        <label for="settingPreview" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer"></label>
-                    </div>
-                </div>
+            <div id="savedList" class="recordings"></div>
+            <div id="emptyState" class="hidden" style="text-align: center; color: #475569; padding: 48px 0;">
+                <div style="margin-bottom: 8px;">No recordings yet</div>
+                <div style="font-size: 12px; color: #334155;">Start recording in the Record tab</div>
+            </div>
+        </div>
 
-                <div class="flex items-center justify-between">
-                    <label class="text-sm text-slate-300">
-                        Auto-Stop (seconds)
-                        <span class="block text-[10px] text-slate-500">0 = Manual stop</span>
-                    </label>
-                    <input type="number" id="settingAutoStop" min="0" max="300" class="w-16 bg-slate-900 border border-slate-600 rounded p-1 text-center text-sm text-white focus:border-sky-500 outline-none">
-                </div>
-
-                <div class="flex items-center justify-between">
-                    <label class="text-sm text-slate-300">
-                        BPM Averaging (Beats)
-                        <span class="block text-[10px] text-slate-500">How many beats to average</span>
-                    </label>
-                    <input type="number" id="settingBpmWindow" min="2" max="50" class="w-16 bg-slate-900 border border-slate-600 rounded p-1 text-center text-sm text-white focus:border-sky-500 outline-none">
-                </div>
-                
-                <div class="flex items-center justify-between">
-                    <label class="text-sm text-slate-300">
-                        Max Recordings
-                        <span class="block text-[10px] text-slate-500">0 = No limit (until full)</span>
-                    </label>
-                    <input type="number" id="settingMaxRecords" min="0" max="1000" class="w-16 bg-slate-900 border border-slate-600 rounded p-1 text-center text-sm text-white focus:border-sky-500 outline-none">
-                </div>
-
-                <div class="flex items-center justify-between">
-                    <label class="text-sm text-slate-300">Auto-Save on Stop</label>
-                    <div class="relative inline-block w-10 mr-2 align-middle select-none">
-                        <input type="checkbox" id="settingAutoSave" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
-                        <label for="settingAutoSave" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer"></label>
-                    </div>
-                </div>
-
-                <div class="border-t border-slate-700 pt-3 mt-2">
-                    <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Camera Specs</h4>
-                    <div id="cameraStats" class="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-400">
-                        <div class="bg-slate-900 p-1.5 rounded">Res: <span id="statRes" class="text-slate-200">--</span></div>
-                        <div class="bg-slate-900 p-1.5 rounded">FPS: <span id="statFps" class="text-slate-200">--</span></div>
-                        <div class="bg-slate-900 p-1.5 rounded">Exp: <span id="statExp" class="text-slate-200">--</span></div>
-                        <div class="bg-slate-900 p-1.5 rounded">ISO: <span id="statIso" class="text-slate-200">--</span></div>
-                    </div>
-                </div>
-
-                <div class="text-center pt-2">
-                    <span class="text-[10px] text-slate-600 font-mono">Pulse Monitor v2.7</span>
+        <div id="contentSettings" class="tab-content scroller">
+            <div class="toggle-row">
+                <label>Camera Preview</label>
+                <input type="checkbox" id="settingPreview" class="toggle-checkbox">
+            </div>
+            
+            <div class="setting-row">
+                <label>
+                    Auto-Stop (seconds)
+                    <small>0 = Manual stop</small>
+                </label>
+                <input type="number" id="settingAutoStop" min="0" max="300" value="30">
+            </div>
+            
+            <div class="setting-row">
+                <label>
+                    BPM Averaging (Beats)
+                    <small>How many beats to average</small>
+                </label>
+                <input type="number" id="settingBpmWindow" min="2" max="50" value="4">
+            </div>
+            
+            <div class="setting-row">
+                <label>
+                    Max Recordings
+                    <small>0 = No limit (until full)</small>
+                </label>
+                <input type="number" id="settingMaxRecords" min="0" max="1000" value="20">
+            </div>
+            
+            <div class="toggle-row">
+                <label>Auto-Save on Stop</label>
+                <input type="checkbox" id="settingAutoSave" class="toggle-checkbox">
+            </div>
+            
+            <div class="camera-stats">
+                <h4>Camera Specs</h4>
+                <div id="cameraStats">
+                    <div>Res: <span id="statRes">--</span></div>
+                    <div>FPS: <span id="statFps">--</span></div>
+                    <div>Exp: <span id="statExp">--</span></div>
+                    <div>ISO: <span id="statIso">--</span></div>
                 </div>
             </div>
-
+            
+            <div class="version">Pulse Monitor v2.7</div>
         </div>
     </div>
 
 <script>
-'use strict';
-
 // ============================================================================
-// CONSTANTS
+// CONSTANTS & CONFIG
 // ============================================================================
 const CONSTANTS = {
     VERSION: 4,
@@ -360,48 +569,211 @@ const CONSTANTS = {
         MAX_STORAGE_MB: 5
     },
     
-    UI: {
-        GRID_MINOR_INTERVAL: 0.2,
-        GRID_MAJOR_INTERVAL: 1.0
+    CAMERA: {
+        PREVIEW_SIZE: 30
+    }
+};
+
+const Config = {
+    showPreview: false,
+    autoStopSeconds: 0,
+    autoSave: false,
+    bpmCalculationWindow: CONSTANTS.BPM.DEFAULT_WINDOW,
+    maxRecords: 50,
+    
+    load() {
+        const saved = localStorage.getItem(CONSTANTS.STORAGE.SETTINGS_KEY);
+        if (saved) {
+            try {
+                Object.assign(this, JSON.parse(saved));
+            } catch(e) {
+                console.error('Failed to load settings', e);
+            }
+        }
     },
     
-    CAMERA: {
-        IDEAL_WIDTH: 320,
-        IDEAL_HEIGHT: 240,
-        IDEAL_FPS: 60,
-        MIN_FPS: 30,
-        PREVIEW_SIZE: 30,
-        EXPOSURE_COMPENSATION: -1.0
+    save() {
+        const data = {
+            showPreview: this.showPreview,
+            autoStopSeconds: this.autoStopSeconds,
+            bpmCalculationWindow: this.bpmCalculationWindow,
+            autoSave: this.autoSave,
+            maxRecords: this.maxRecords
+        };
+        localStorage.setItem(CONSTANTS.STORAGE.SETTINGS_KEY, JSON.stringify(data));
+    }
+};
+
+const DOM = {
+    video: document.getElementById('videoElement'),
+    ppgCanvas: document.getElementById('ppgCanvas'),
+    previewCanvas: document.getElementById('previewCanvas'),
+    bpmDisplay: document.getElementById('bpmDisplay'),
+    modeBadge: document.getElementById('modeBadge'),
+    saturationWarning: document.getElementById('saturationWarning'),
+    torchWarning: document.getElementById('torchWarning'),
+    instructionOverlay: document.getElementById('instructionOverlay'),
+    reviewControls: document.getElementById('reviewControls'),
+    reviewTimeDisplay: document.getElementById('reviewTimeDisplay'),
+    historySlider: document.getElementById('historySlider'),
+    
+    tabRecord: document.getElementById('tabRecord'),
+    tabHistory: document.getElementById('tabHistory'),
+    tabSettings: document.getElementById('tabSettings'),
+    contentRecord: document.getElementById('contentRecord'),
+    contentHistory: document.getElementById('contentHistory'),
+    contentSettings: document.getElementById('contentSettings'),
+    
+    cameraBtn: document.getElementById('cameraBtn'),
+    simulateBtn: document.getElementById('simulateBtn'),
+    saveBtn: document.getElementById('saveBtn'),
+    backToLiveBtn: document.getElementById('backToLiveBtn'),
+    exportImgBtn: document.getElementById('exportImgBtn'),
+    exportJsonBtn: document.getElementById('exportJsonBtn'),
+    deleteOldestBtn: document.getElementById('deleteOldestBtn'),
+    
+    simControls: document.getElementById('simControls'),
+    bpmSlider: document.getElementById('bpmSlider'),
+    targetBpmValue: document.getElementById('targetBpmValue'),
+    savedList: document.getElementById('savedList'),
+    
+    settingPreview: document.getElementById('settingPreview'),
+    settingAutoStop: document.getElementById('settingAutoStop'),
+    settingAutoSave: document.getElementById('settingAutoSave'),
+    settingBpmWindow: document.getElementById('settingBpmWindow'),
+    settingMaxRecords: document.getElementById('settingMaxRecords'),
+    
+    statRes: document.getElementById('statRes'),
+    statFps: document.getElementById('statFps'),
+    statExp: document.getElementById('statExp'),
+    statIso: document.getElementById('statIso'),
+    
+    storageInfo: document.getElementById('storageInfo'),
+    storageBar: document.getElementById('storageBar'),
+    recordCount: document.getElementById('recordCount'),
+    emptyState: document.getElementById('emptyState')
+};
+
+const ppgCtx = DOM.ppgCanvas.getContext('2d', { alpha: false });
+const previewCtx = DOM.previewCanvas.getContext('2d', { willReadFrequently: true });
+
+let animationFrameId;
+
+// ============================================================================
+// APP STATE
+// ============================================================================
+const AppState = {
+    mode: 'idle',
+    totalTime: 0,
+    lastTime: null,
+    simPhase: 0,
+    simBpm: CONSTANTS.SIMULATION.DEFAULT_BPM,
+    history: [],
+    reviewData: null,
+    reviewOffset: 0,
+    
+    addHistoryPoint(time, val, threshold, isBeat, bpm) {
+        this.history.push({ time, val, threshold, beat: isBeat, bpm });
+        if (this.history.length > DOM.ppgCanvas.width * 2) {
+            this.history.shift();
+        }
+    },
+    
+    clearHistory() {
+        this.history = [];
+        this.totalTime = 0;
+        this.lastTime = null;
     }
 };
 
 // ============================================================================
-// PWA Setup
+// CAMERA MODULE
 // ============================================================================
-(function() {
-    const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='#0f172a'/><path d='M256 448l-30-30C118 322 48 250 48 162 48 90 106 32 178 32c40 0 78 22 96 56 18-34 56-56 96-56 72 0 130 58 130 130 0 88-70 160-178 256l-30 30z' fill='#ef4444'/></svg>`;
-    const url = "data:image/svg+xml;base64," + btoa(svg);
+const Camera = {
+    stream: null,
+    torchSupported: false,
     
-    document.getElementById('dynamic-favicon').href = url;
-    document.getElementById('dynamic-apple-icon').href = url;
+    async start() {
+        try {
+            this.stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: 'environment',
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 }
+                }
+            });
+            
+            DOM.video.srcObject = this.stream;
+            await DOM.video.play();
+            
+            const track = this.stream.getVideoTracks()[0];
+            const capabilities = track.getCapabilities?.() || {};
+            this.torchSupported = capabilities.torch === true;
+            
+            if (this.torchSupported) {
+                await track.applyConstraints({ advanced: [{ torch: true }] });
+                DOM.torchWarning.classList.add('hidden');
+            } else {
+                DOM.torchWarning.classList.remove('hidden');
+            }
+            
+            return true;
+        } catch (err) {
+            console.error('Camera error:', err);
+            alert('Camera access failed: ' + err.message);
+            return false;
+        }
+    },
     
-    const manifest = {
-        name: "Pulse Monitor",
-        short_name: "Pulse",
-        start_url: ".",
-        display: "standalone",
-        background_color: "#0f172a",
-        theme_color: "#0f172a",
-        orientation: "portrait",
-        icons: [{src: url, sizes: "512x512", type: "image/svg+xml"}]
-    };
+    getStats(track) {
+        const s = track.getSettings();
+        return {
+            resolution: `${s.width}x${s.height}`,
+            fps: s.frameRate ? s.frameRate.toFixed(1) : '--',
+            exposure: s.exposureCompensation || s.exposureMode || '--',
+            iso: s.iso || '--'
+        };
+    },
     
-    document.getElementById('dynamic-manifest').href = 
-        "data:application/manifest+json;base64," + btoa(JSON.stringify(manifest));
-})();
+    stop() {
+        if (this.stream) {
+            this.stream.getTracks().forEach(t => t.stop());
+            this.stream = null;
+        }
+        DOM.video.srcObject = null;
+    }
+};
 
 // ============================================================================
-// SIGNAL PROCESSING MODULE
+// WAKE LOCK
+// ============================================================================
+const WakeLock = {
+    lock: null,
+    
+    async acquire() {
+        if ('wakeLock' in navigator && !this.lock) {
+            try {
+                this.lock = await navigator.wakeLock.request('screen');
+                this.lock.addEventListener('release', () => { this.lock = null; });
+                return true;
+            } catch (err) {
+                console.warn('Wake Lock error', err);
+            }
+        }
+        return false;
+    },
+    
+    async release() {
+        if (this.lock) {
+            try { await this.lock.release(); } 
+            catch(e) { console.warn('Wake Lock release error', e); }
+            this.lock = null;
+        }
+    }
+};
+
+// ============================================================================
+// SIGNAL PROCESSING
 // ============================================================================
 const SignalProcessor = {
     recentValues: [],
@@ -480,7 +852,7 @@ const SignalProcessor = {
 };
 
 // ============================================================================
-// BEAT DETECTION MODULE
+// BEAT DETECTION
 // ============================================================================
 const BeatDetector = {
     lastBeatTime: 0,
@@ -597,7 +969,84 @@ const BeatDetector = {
 };
 
 // ============================================================================
-// STORAGE MODULE
+// RENDERER
+// ============================================================================
+const Renderer = {
+    drawSignal(canvas, ppgCtx, data, mode, viewStart, viewEnd) {
+        if (!data || !data.length) return;
+        
+        const viewData = data.slice(viewStart, viewEnd);
+        if (!viewData.length) return;
+
+        const cy = canvas.height / 2;
+        const sy = canvas.height / 2.2;
+        const color = mode === 'simulate' ? '#a855f7' : (mode === 'review' ? '#f59e0b' : '#ef4444');
+        
+        ppgCtx.textAlign = "center";
+        ppgCtx.textBaseline = "bottom";
+        ppgCtx.font = "9px monospace";
+        
+        const signalPath = [];
+        const thresholdPath = [];
+        const beatMarkers = [];
+        
+        for (let i = 0; i < viewData.length; i++) {
+            const d = viewData[i];
+            const y = cy - d.val * sy;
+            
+            signalPath.push({ x: i, y });
+            thresholdPath.push({ x: i, y: cy - d.threshold * sy });
+            
+            if (d.beat) beatMarkers.push({ x: i, y });
+            
+            if (i > 0) {
+                const prevTime = viewData[i - 1].time;
+                if (Math.floor(d.time) !== Math.floor(prevTime)) {
+                    ppgCtx.beginPath();
+                    ppgCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+                    ppgCtx.moveTo(i, 0);
+                    ppgCtx.lineTo(i, canvas.height);
+                    ppgCtx.stroke();
+                    
+                    ppgCtx.fillStyle = 'rgba(255,255,255,0.3)';
+                    ppgCtx.fillText(Math.floor(d.time) + 's', i, canvas.height - 2);
+                }
+            }
+        }
+        
+        ppgCtx.beginPath();
+        ppgCtx.strokeStyle = 'rgba(255,200,0,0.3)';
+        ppgCtx.setLineDash([4, 4]);
+        thresholdPath.forEach((p, i) => {
+            i === 0 ? ppgCtx.moveTo(p.x, p.y) : ppgCtx.lineTo(p.x, p.y);
+        });
+        ppgCtx.stroke();
+        ppgCtx.setLineDash([]);
+        
+        ppgCtx.beginPath();
+        ppgCtx.strokeStyle = color;
+        ppgCtx.lineWidth = 2;
+        signalPath.forEach((p, i) => {
+            i === 0 ? ppgCtx.moveTo(p.x, p.y) : ppgCtx.lineTo(p.x, p.y);
+        });
+        ppgCtx.stroke();
+        
+        ppgCtx.lineTo(viewData.length - 1, canvas.height);
+        ppgCtx.lineTo(0, canvas.height);
+        ppgCtx.fillStyle = color + "20";
+        ppgCtx.fill();
+        
+        ppgCtx.fillStyle = "#fff";
+        beatMarkers.forEach(p => {
+            ppgCtx.beginPath();
+            ppgCtx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+            ppgCtx.fill();
+        });
+    }
+};
+
+// ============================================================================
+// STORAGE
 // ============================================================================
 const Storage = {
     async save(recording) {
@@ -677,352 +1126,29 @@ const Storage = {
 };
 
 // ============================================================================
-// CONFIG MODULE
-// ============================================================================
-const Config = {
-    showPreview: false,
-    autoStopSeconds: 0,
-    bpmCalculationWindow: CONSTANTS.BPM.DEFAULT_WINDOW,
-    autoSave: false,
-    maxRecords: 50,
-    
-    load() {
-        const saved = localStorage.getItem(CONSTANTS.STORAGE.SETTINGS_KEY);
-        if (saved) {
-            try {
-                Object.assign(this, JSON.parse(saved));
-            } catch(e) {
-                console.error('Failed to load settings', e);
-            }
-        }
-    },
-    
-    save() {
-        const data = {
-            showPreview: this.showPreview,
-            autoStopSeconds: this.autoStopSeconds,
-            bpmCalculationWindow: this.bpmCalculationWindow,
-            autoSave: this.autoSave,
-            maxRecords: this.maxRecords
-        };
-        localStorage.setItem(CONSTANTS.STORAGE.SETTINGS_KEY, JSON.stringify(data));
-    }
-};
-
-// ============================================================================
-// RENDERER MODULE
-// ============================================================================
-const Renderer = {
-    drawSignal(canvas, ctx, data, mode, viewStart, viewEnd) {
-        if (!data || !data.length) return;
-        
-        const viewData = data.slice(viewStart, viewEnd);
-        if (!viewData.length) return;
-
-        const cy = canvas.height / 2;
-        const sy = canvas.height / 2.2;
-        const my = v => cy - v * sy;
-
-        this._drawGrid(ctx, canvas, viewData);
-        this._drawThreshold(ctx, viewData, my);
-        this._drawWaveform(ctx, canvas, viewData, my, 
-            mode === 'simulate' ? '#a855f7' : (mode === 'review' ? '#f59e0b' : '#ef4444'));
-        this._drawBeats(ctx, viewData, my);
-    },
-    
-    _drawGrid(ctx, canvas, viewData) {
-        ctx.textAlign = "center";
-        ctx.textBaseline = "bottom";
-        ctx.font = "9px monospace";
-
-        for (let i = 0; i < viewData.length; i++) {
-            const currentTime = viewData[i].time;
-            const prevTime = i > 0 ? viewData[i - 1].time : currentTime;
-            
-            if (Math.floor(currentTime / CONSTANTS.UI.GRID_MINOR_INTERVAL) !== 
-                Math.floor(prevTime / CONSTANTS.UI.GRID_MINOR_INTERVAL)) {
-                ctx.beginPath();
-                ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-                ctx.moveTo(i, 0);
-                ctx.lineTo(i, canvas.height);
-                ctx.stroke();
-            }
-
-            if (Math.floor(currentTime / CONSTANTS.UI.GRID_MAJOR_INTERVAL) !== 
-                Math.floor(prevTime / CONSTANTS.UI.GRID_MAJOR_INTERVAL)) {
-                ctx.beginPath();
-                ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-                ctx.moveTo(i, 0);
-                ctx.lineTo(i, canvas.height);
-                ctx.stroke();
-                
-                ctx.fillStyle = 'rgba(255,255,255,0.3)';
-                ctx.fillText(Math.floor(currentTime) + 's', i, canvas.height - 2);
-            }
-        }
-    },
-    
-    _drawThreshold(ctx, viewData, yTransform) {
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(255,200,0,0.3)';
-        ctx.setLineDash([4, 4]);
-        viewData.forEach((d, i) => {
-            if (i === 0) ctx.moveTo(i, yTransform(d.threshold));
-            else ctx.lineTo(i, yTransform(d.threshold));
-        });
-        ctx.stroke();
-        ctx.setLineDash([]);
-    },
-    
-    _drawWaveform(ctx, canvas, viewData, yTransform, color) {
-        ctx.beginPath();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        viewData.forEach((d, i) => {
-            if (i === 0) ctx.moveTo(i, yTransform(d.val));
-            else ctx.lineTo(i, yTransform(d.val));
-        });
-        ctx.stroke();
-
-        ctx.lineTo(viewData.length - 1, canvas.height);
-        ctx.lineTo(0, canvas.height);
-        ctx.fillStyle = color + "20";
-        ctx.fill();
-    },
-    
-    _drawBeats(ctx, viewData, yTransform) {
-        ctx.fillStyle = "#fff";
-        viewData.forEach((d, i) => {
-            if (d.beat) {
-                ctx.beginPath();
-                ctx.arc(i, yTransform(d.val), 3, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        });
-    }
-};
-
-// ============================================================================
-// CAMERA MODULE
-// ============================================================================
-const Camera = {
-    stream: null,
-    
-    async start(videoElement) {
-        const constraints = {
-            audio: false,
-            video: {
-                facingMode: 'environment',
-                width: { ideal: CONSTANTS.CAMERA.IDEAL_WIDTH },
-                height: { ideal: CONSTANTS.CAMERA.IDEAL_HEIGHT },
-                frameRate: { ideal: CONSTANTS.CAMERA.IDEAL_FPS, min: CONSTANTS.CAMERA.MIN_FPS }
-            }
-        };
-        
-        this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-        videoElement.srcObject = this.stream;
-        
-        await new Promise(r => videoElement.onloadedmetadata = r);
-        
-        const track = this.stream.getVideoTracks()[0];
-        const torchAvailable = await this._applyOptimizedConstraints(track);
-        await videoElement.play();
-        
-        return { track, torchAvailable };
-    },
-    
-    async _applyOptimizedConstraints(track) {
-        const caps = track.getCapabilities ? track.getCapabilities() : {};
-        const advanced = [];
-        const mainConstraints = {};
-
-        if (caps.torch) advanced.push({ torch: true });
-        if (caps.focusMode && caps.focusMode.includes('continuous')) {
-            mainConstraints.focusMode = 'continuous';
-        }
-        if (caps.whiteBalanceMode && caps.whiteBalanceMode.includes('single-shot')) {
-            mainConstraints.whiteBalanceMode = 'single-shot';
-        }
-        if (caps.exposureCompensation) {
-            const minExp = caps.exposureCompensation.min || -2;
-            const maxExp = caps.exposureCompensation.max || 2;
-            mainConstraints.exposureCompensation = Math.max(minExp, 
-                Math.min(maxExp, CONSTANTS.CAMERA.EXPOSURE_COMPENSATION));
-        }
-        if (caps.iso && caps.iso.min) mainConstraints.iso = caps.iso.min;
-        if (caps.frameRate && caps.frameRate.max >= 55) {
-            mainConstraints.frameRate = { ideal: CONSTANTS.CAMERA.IDEAL_FPS };
-        }
-
-        try {
-            await track.applyConstraints({ advanced, ...mainConstraints });
-            return true;
-        } catch (e) {
-            console.warn('Could not apply advanced constraints:', e);
-            if (caps.torch) {
-                try {
-                    await track.applyConstraints({ advanced: [{ torch: true }] });
-                    return true;
-                } catch(err) {
-                    console.error('Torch unavailable:', err);
-                }
-            }
-            return false;
-        }
-    },
-    
-    getStats(track) {
-        const s = track.getSettings();
-        return {
-            resolution: `${s.width}x${s.height}`,
-            fps: s.frameRate ? s.frameRate.toFixed(1) : '--',
-            exposure: s.exposureCompensation || s.exposureMode || '--',
-            iso: s.iso || '--'
-        };
-    },
-    
-    stop() {
-        if (this.stream) {
-            this.stream.getTracks().forEach(t => {
-                try {
-                    t.applyConstraints({ advanced: [{ torch: false }] });
-                } catch(e) {}
-                t.stop();
-            });
-            this.stream = null;
-        }
-    }
-};
-
-// ============================================================================
-// WAKE LOCK MODULE
-// ============================================================================
-const WakeLock = {
-    lock: null,
-    
-    async acquire() {
-        if ('wakeLock' in navigator && !this.lock) {
-            try {
-                this.lock = await navigator.wakeLock.request('screen');
-                this.lock.addEventListener('release', () => { this.lock = null; });
-                return true;
-            } catch (err) {
-                console.warn('Wake Lock error', err);
-            }
-        }
-        return false;
-    },
-    
-    async release() {
-        if (this.lock) {
-            try { await this.lock.release(); } 
-            catch(e) { console.warn('Wake Lock release error', e); }
-            this.lock = null;
-        }
-    }
-};
-
-// ============================================================================
-// APPLICATION STATE
-// ============================================================================
-const AppState = {
-    mode: 'idle',
-    lastTime: 0,
-    totalTime: 0,
-    history: [],
-    reviewData: null,
-    reviewOffset: 0,
-    simPhase: 0,
-    simBpm: CONSTANTS.SIMULATION.DEFAULT_BPM,
-    sessionId: null,
-    sessionStartTime: null,
-    currentTab: 'record',
-    
-    reset() {
-        this.history = [];
-        this.totalTime = 0;
-        this.reviewData = null;
-        this.reviewOffset = 0;
-        SignalProcessor.reset();
-        BeatDetector.reset();
-    },
-    
-    startSession() {
-        this.sessionId = Date.now();
-        this.sessionStartTime = new Date().toISOString();
-    },
-    
-    addHistoryPoint(time, val, threshold, beat, bpm) {
-        this.history.push({ time, val, threshold, beat, bpm });
-        if (this.history.length > CONSTANTS.SIGNAL.MAX_HISTORY_LENGTH) {
-            this.history.shift();
-        }
-    }
-};
-
-// ============================================================================
-// DOM ELEMENTS
-// ============================================================================
-const $ = id => document.getElementById(id);
-
-const DOM = {
-    video: $('videoElement'),
-    canvas: $('ppgCanvas'),
-    preview: $('previewCanvas'),
-    container: $('canvasContainer'),
-    bpmDisplay: $('bpmDisplay'),
-    modeBadge: $('modeBadge'),
-    instructionOverlay: $('instructionOverlay'),
-    saturationWarning: $('saturationWarning'),
-    torchWarning: $('torchWarning'),
-    cameraBtn: $('cameraBtn'),
-    simulateBtn: $('simulateBtn'),
-    simControls: $('simControls'),
-    bpmSlider: $('bpmSlider'),
-    targetBpmValue: $('targetBpmValue'),
-    debugGain: $('debugGain'),
-    saveBtn: $('saveBtn'),
-    savedList: $('savedListContainer'),
-    reviewControls: $('reviewControls'),
-    historySlider: $('historySlider'),
-    backToLiveBtn: $('backToLiveBtn'),
-    reviewTimeDisplay: $('reviewTimeDisplay'),
-    emptyState: $('emptyState'),
-    storageInfo: $('storageInfo'),
-    storageBar: $('storageBar'),
-    recordCount: $('recordCount'),
-    exportJsonBtn: $('exportJsonBtn'),
-    exportImgBtn: $('exportImgBtn'),
-    deleteOldestBtn: $('deleteOldestBtn'),
-    settingPreview: $('settingPreview'),
-    settingAutoStop: $('settingAutoStop'),
-    settingAutoSave: $('settingAutoSave'),
-    settingBpmWindow: $('settingBpmWindow'),
-    settingMaxRecords: $('settingMaxRecords'),
-    statRes: $('statRes'),
-    statFps: $('statFps'),
-    statExp: $('statExp'),
-    statIso: $('statIso'),
-    tabRecord: $('tabRecord'),
-    tabHistory: $('tabHistory'),
-    tabSettings: $('tabSettings'),
-    contentRecord: $('contentRecord'),
-    contentHistory: $('contentHistory'),
-    contentSettings: $('contentSettings')
-};
-
-const ctx = DOM.canvas.getContext('2d');
-const offCtx = DOM.preview.getContext('2d', { willReadFrequently: true });
-
-let animationFrameId = null;
-
-// ============================================================================
 // UI HELPERS
 // ============================================================================
 const UI = {
+    switchTab(tab) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+        
+        if (tab === 'record') {
+            DOM.tabRecord.classList.add('active');
+            DOM.contentRecord.classList.remove('hidden');
+        } else if (tab === 'history') {
+            DOM.tabHistory.classList.add('active');
+            DOM.contentHistory.classList.remove('hidden');
+            renderRecordingsList();
+        } else if (tab === 'settings') {
+            DOM.tabSettings.classList.add('active');
+            DOM.contentSettings.classList.remove('hidden');
+        }
+    },
+    
     updateBPMDisplay(bpm, colorClass) {
-        DOM.bpmDisplay.innerText = bpm;
-        DOM.bpmDisplay.className = "text-4xl font-mono font-bold tracking-tighter " + colorClass;
+        DOM.bpmDisplay.innerText = bpm > 0 ? bpm : '--';
+        DOM.bpmDisplay.className = colorClass || '';
     },
     
     updateStorageInfo() {
@@ -1034,8 +1160,9 @@ const UI = {
         DOM.storageBar.style.width = Math.min(percentage, 100) + '%';
         DOM.recordCount.innerText = `${records.length} Recording${records.length !== 1 ? 's' : ''}`;
         
-        DOM.storageBar.className = percentage > 90 ? 'bg-rose-500 h-full' : 
-            (percentage > 70 ? 'bg-amber-500 h-full' : 'bg-sky-500 h-full');
+        const barClass = percentage > 90 ? 'storage-bar critical' : 
+            (percentage > 70 ? 'storage-bar warning' : 'storage-bar');
+        DOM.storageBar.className = barClass;
     },
     
     updateCameraStats(track) {
@@ -1046,171 +1173,88 @@ const UI = {
         DOM.statIso.innerText = stats.iso;
     },
     
-    switchTab(tabName) {
-        DOM.tabRecord.classList.remove('active');
-        DOM.tabHistory.classList.remove('active');
-        DOM.tabSettings.classList.remove('active');
-        DOM.contentRecord.classList.add('hidden');
-        DOM.contentHistory.classList.add('hidden');
-        DOM.contentSettings.classList.add('hidden');
-        
-        if (tabName === 'record') {
-            DOM.tabRecord.classList.add('active');
-            DOM.contentRecord.classList.remove('hidden');
-        } else if (tabName === 'history') {
-            DOM.tabHistory.classList.add('active');
-            DOM.contentHistory.classList.remove('hidden');
-        } else if (tabName === 'settings') {
-            DOM.tabSettings.classList.add('active');
-            DOM.contentSettings.classList.remove('hidden');
-        }
-        
-        AppState.currentTab = tabName;
-    },
-    
     updateButtonsForMode(mode) {
-        if (mode === 'camera') {
-            DOM.cameraBtn.innerText = 'STOP';
-            DOM.cameraBtn.className = 'h-12 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg shadow-lg shadow-rose-900/20 text-xs';
-            DOM.simulateBtn.innerText = 'Simulate';
-            DOM.simulateBtn.className = 'h-12 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg shadow-purple-900/20 text-xs';
-            DOM.modeBadge.innerText = 'CAMERA';
-            DOM.modeBadge.classList.remove('hidden');
-        } else if (mode === 'simulate') {
-            DOM.simulateBtn.innerText = 'STOP';
-            DOM.simulateBtn.className = 'h-12 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg shadow-lg shadow-rose-900/20 text-xs';
-            DOM.cameraBtn.innerText = 'Camera';
-            DOM.cameraBtn.className = 'h-12 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-lg shadow-lg shadow-sky-900/20 text-xs';
-            DOM.modeBadge.innerText = 'SIM';
-            DOM.modeBadge.classList.remove('hidden');
-        } else if (mode === 'review') {
-            DOM.modeBadge.innerText = 'REVIEW';
-            DOM.modeBadge.classList.remove('hidden');
-        } else {
-            DOM.cameraBtn.innerText = 'Camera';
-            DOM.cameraBtn.className = 'h-12 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-lg shadow-lg shadow-sky-900/20 text-xs';
-            DOM.simulateBtn.innerText = 'Simulate';
-            DOM.simulateBtn.className = 'h-12 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg shadow-purple-900/20 text-xs';
-            DOM.modeBadge.classList.add('hidden');
-        }
+        DOM.cameraBtn.innerText = mode === 'camera' ? 'Stop' : 'Camera';
+        DOM.simulateBtn.innerText = mode === 'simulate' ? 'Stop' : 'Simulate';
+        DOM.saveBtn.disabled = mode !== 'idle' || AppState.history.length === 0;
     }
 };
-
-// ============================================================================
-// CANVAS RESIZE
-// ============================================================================
-function resizeCanvas() {
-    DOM.canvas.width = DOM.container.clientWidth;
-    DOM.canvas.height = DOM.container.clientHeight;
-}
-
-window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
-
-// ============================================================================
-// SETTINGS MANAGEMENT
-// ============================================================================
-function loadSettings() {
-    Config.load();
-    DOM.settingPreview.checked = Config.showPreview;
-    DOM.settingAutoStop.value = Config.autoStopSeconds;
-    DOM.settingAutoSave.checked = Config.autoSave;
-    DOM.settingBpmWindow.value = Config.bpmCalculationWindow;
-    DOM.settingMaxRecords.value = Config.maxRecords;
-    DOM.preview.classList.toggle('hidden', !Config.showPreview);
-}
-
-function saveSettings() {
-    Config.showPreview = DOM.settingPreview.checked;
-    Config.autoStopSeconds = parseInt(DOM.settingAutoStop.value) || 0;
-    Config.bpmCalculationWindow = parseInt(DOM.settingBpmWindow.value) || CONSTANTS.BPM.DEFAULT_WINDOW;
-    Config.maxRecords = parseInt(DOM.settingMaxRecords.value) || 0;
-    Config.autoSave = DOM.settingAutoSave.checked;
-    
-    Config.save();
-    DOM.preview.classList.toggle('hidden', !Config.showPreview);
-    BeatDetector.reset();
-}
 
 // ============================================================================
 // MODE MANAGEMENT
 // ============================================================================
 async function setMode(newMode) {
-    const prevMode = AppState.mode;
+    if (AppState.mode === newMode) return;
     
-    // AUTO-SAVE CHECK FIRST
-    if ((prevMode === 'camera' || prevMode === 'simulate') && newMode === 'idle') {
-        if (Config.autoSave && AppState.history.length >= CONSTANTS.STORAGE.MIN_SAVE_LENGTH) {
-            await saveRecording();
+    // AUTO-SAVE CHECK when stopping recording
+    if ((AppState.mode === 'camera' || AppState.mode === 'simulate') && newMode === 'idle') {
+        if (Config.autoSave && AppState.history.length > 0) {
+            saveRecording();
         }
     }
     
-    // Cleanup previous mode
-    if (prevMode === 'camera' && newMode !== 'camera') {
+    if (AppState.mode === 'camera') {
         Camera.stop();
         await WakeLock.release();
-        DOM.video.pause();
-        DOM.video.srcObject = null;
     }
     
-    if (prevMode === 'review' && newMode !== 'review') {
-        AppState.reviewData = null;
-    }
-
     AppState.mode = newMode;
-    AppState.reset();
     
-    DOM.saturationWarning.classList.add('hidden');
-    DOM.torchWarning.classList.add('hidden');
-    DOM.instructionOverlay.classList.add('hidden');
-    DOM.saveBtn.disabled = true;
-    DOM.saveBtn.innerText = "Save";
-    DOM.reviewControls.classList.remove('flex');
-    DOM.reviewControls.classList.add('hidden');
-    DOM.simControls.classList.add('hidden');
-    
-    DOM.bpmDisplay.className = "text-4xl font-mono font-bold text-slate-500 tracking-tighter";
-    DOM.bpmDisplay.innerText = "--";
-    offCtx.clearRect(0, 0, CONSTANTS.CAMERA.PREVIEW_SIZE, CONSTANTS.CAMERA.PREVIEW_SIZE);
-
-    UI.updateButtonsForMode(newMode);
-
     if (newMode === 'idle') {
         DOM.instructionOverlay.classList.remove('hidden');
+        DOM.modeBadge.classList.add('hidden');
+        DOM.reviewControls.classList.remove('active');
+        DOM.saturationWarning.classList.add('hidden');
+        DOM.torchWarning.classList.add('hidden');
+        DOM.simControls.classList.add('hidden');
+        UI.updateBPMDisplay(0);
         
     } else if (newMode === 'camera') {
-        DOM.saveBtn.disabled = false;
-        AppState.startSession();
-        
-        try {
-            const { track, torchAvailable } = await Camera.start(DOM.video);
-            UI.updateCameraStats(track);
-            DOM.torchWarning.classList.toggle('hidden', torchAvailable);
-            await WakeLock.acquire();
-        } catch(err) {
-            alert("Camera unavailable or permission denied.");
-            setMode('idle');
+        const started = await Camera.start();
+        if (!started) {
+            AppState.mode = 'idle';
+            return;
         }
+        await WakeLock.acquire();
+        AppState.clearHistory();
+        SignalProcessor.reset();
+        BeatDetector.reset();
+        DOM.instructionOverlay.classList.add('hidden');
+        DOM.modeBadge.classList.remove('hidden');
+        DOM.modeBadge.innerText = 'CAMERA';
+        DOM.simControls.classList.add('hidden');
+        
+        const track = Camera.stream.getVideoTracks()[0];
+        UI.updateCameraStats(track);
         
     } else if (newMode === 'simulate') {
+        AppState.clearHistory();
+        AppState.simPhase = 0;
+        SignalProcessor.reset();
+        BeatDetector.reset();
+        DOM.instructionOverlay.classList.add('hidden');
+        DOM.modeBadge.classList.remove('hidden');
+        DOM.modeBadge.innerText = 'SIMULATE';
         DOM.simControls.classList.remove('hidden');
-        DOM.saveBtn.disabled = false;
-        AppState.startSession();
-        await WakeLock.acquire();
         
     } else if (newMode === 'review') {
-        DOM.reviewControls.classList.remove('hidden');
-        DOM.reviewControls.classList.add('flex');
+        DOM.instructionOverlay.classList.add('hidden');
+        DOM.reviewControls.classList.add('active');
+        DOM.modeBadge.classList.remove('hidden');
+        DOM.modeBadge.innerText = 'REVIEW';
+        DOM.simControls.classList.add('hidden');
     }
+    
+    UI.updateButtonsForMode(newMode);
 }
 
 // ============================================================================
-// SAVE & EXPORT
+// ACTIONS
 // ============================================================================
 async function saveRecording() {
-    const historySnapshot = [...AppState.history];
-
-    if (historySnapshot.length < CONSTANTS.STORAGE.MIN_SAVE_LENGTH) {
+    if (AppState.history.length === 0) return;
+    
+    if (AppState.history.length < CONSTANTS.STORAGE.MIN_SAVE_LENGTH) {
         if (!Config.autoSave) {
             alert("Too short to save (minimum 1 second)");
         }
@@ -1219,30 +1263,32 @@ async function saveRecording() {
 
     if (!(await Storage.checkQuota())) return;
     
-    try {
-        const recording = {
-            id: AppState.sessionId || Date.now(),
-            v: CONSTANTS.VERSION,
-            timestamp: AppState.sessionStartTime || new Date().toISOString(),
-            avgBpm: Math.round(BeatDetector.bpm) || '--',
-            duration: AppState.totalTime,
-            samples: historySnapshot.map(h => ({ t: h.time, v: h.val }))
-        };
-
-        await Storage.save(recording);
-        renderRecordingsList();
-        
-        DOM.saveBtn.innerText = "Saved";
-        setTimeout(() => DOM.saveBtn.innerText = "Save", 1500);
-        
-    } catch(e) {
-        console.error(e);
-        if (e.name === 'QuotaExceededError') {
-            alert("Storage full. Please delete old recordings.");
-        } else if (!Config.autoSave) {
-            alert("Save failed");
-        }
+    const recording = {
+        id: Date.now(),
+        v: CONSTANTS.VERSION,
+        timestamp: new Date().toISOString(),
+        duration: AppState.totalTime,
+        avgBpm: Math.round(BeatDetector.bpm) || 0,
+        samples: AppState.history.map(h => ({ t: h.time, v: h.val }))
+    };
+    
+    await Storage.save(recording);
+    renderRecordingsList();
+    
+    if (!Config.autoSave) {
+        alert(`Saved! BPM: ${recording.avgBpm || 'N/A'}, Duration: ${AppState.totalTime.toFixed(1)}s`);
     }
+}
+
+function exportGraphImage() {
+    DOM.ppgCanvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pulse-graph-${Date.now()}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
 }
 
 function exportAllData() {
@@ -1258,30 +1304,26 @@ function exportAllData() {
     URL.revokeObjectURL(url);
 }
 
-function exportGraphImage() {
-    const data = AppState.mode === 'review' ? AppState.reviewData : AppState.history;
-    const viewEnd = AppState.mode === 'review' ? AppState.reviewOffset : data.length;
+function saveSettings() {
+    Config.showPreview = DOM.settingPreview.checked;
+    Config.autoStopSeconds = parseInt(DOM.settingAutoStop.value) || 0;
+    Config.bpmCalculationWindow = parseInt(DOM.settingBpmWindow.value) || CONSTANTS.BPM.DEFAULT_WINDOW;
+    Config.maxRecords = parseInt(DOM.settingMaxRecords.value) || 0;
+    Config.autoSave = DOM.settingAutoSave.checked;
     
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, 0, DOM.canvas.width, DOM.canvas.height);
-    Renderer.drawSignal(DOM.canvas, ctx, data, AppState.mode, 0, viewEnd);
-    
-    ctx.save();
-    ctx.fillStyle = "#0f172a";
-    ctx.fillRect(0, 0, 140, 60);
-    ctx.fillStyle = '#f59e0b';
-    ctx.font = 'bold 24px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(`${DOM.bpmDisplay.innerText} BPM`, 10, 30);
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '10px sans-serif';
-    ctx.fillText(new Date().toLocaleDateString(), 10, 45);
-    ctx.restore();
+    Config.save();
+    DOM.previewCanvas.classList.toggle('hidden', !Config.showPreview);
+    BeatDetector.reset();
+}
 
-    const link = document.createElement('a');
-    link.download = `pulse_${Date.now()}.png`;
-    link.href = DOM.canvas.toDataURL('image/png');
-    link.click();
+function loadSettings() {
+    Config.load();
+    DOM.settingPreview.checked = Config.showPreview;
+    DOM.settingAutoStop.value = Config.autoStopSeconds;
+    DOM.settingAutoSave.checked = Config.autoSave;
+    DOM.settingBpmWindow.value = Config.bpmCalculationWindow;
+    DOM.settingMaxRecords.value = Config.maxRecords;
+    DOM.previewCanvas.classList.toggle('hidden', !Config.showPreview);
 }
 
 // ============================================================================
@@ -1293,30 +1335,32 @@ function renderRecordingsList() {
     DOM.savedList.innerHTML = '';
     
     if (!records.length) {
-        return DOM.savedList.appendChild(DOM.emptyState);
+        DOM.emptyState.classList.remove('hidden');
+        return;
     }
+    
+    DOM.emptyState.classList.add('hidden');
     
     records.forEach(r => {
         const d = new Date(r.timestamp);
         const div = document.createElement('div');
-        
-        div.className = "bg-slate-800/80 p-3 rounded-lg border border-slate-700 hover:border-sky-500 cursor-pointer flex justify-between items-center";
+        div.className = 'recording-item';
         
         div.innerHTML = `
             <div>
-                <div class="font-bold text-sky-400 text-xs">
+                <div style="font-weight: bold; color: #38bdf8; font-size: 12px;">
                     ${d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
                 </div>
-                <div class="text-[10px] text-slate-500">
+                <div style="font-size: 10px; color: #64748b;">
                     ${d.toLocaleDateString()} • ${r.duration.toFixed(1)}s
                 </div>
             </div>
-            <div class="flex items-center gap-3">
-                <div class="text-right">
-                    <div class="text-[9px] text-slate-500 uppercase">Avg BPM</div>
-                    <div class="font-bold text-slate-200 text-sm">${r.avgBpm}</div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="text-align: right;">
+                    <div style="font-size: 9px; color: #64748b; text-transform: uppercase;">Avg BPM</div>
+                    <div style="font-weight: bold; color: #e2e8f0; font-size: 14px;">${r.avgBpm}</div>
                 </div>
-                <button class="del p-2 text-slate-500 hover:text-rose-400" data-id="${r.id}">✕</button>
+                <button class="delete-btn del" data-id="${r.id}">✕</button>
             </div>
         `;
         
@@ -1360,7 +1404,7 @@ function openReview(recording) {
     DOM.historySlider.value = recording.samples.length;
     AppState.reviewOffset = recording.samples.length;
     
-    UI.updateBPMDisplay(calculatedBpm || recording.avgBpm, "text-amber-500");
+    UI.updateBPMDisplay(calculatedBpm || recording.avgBpm);
 }
 
 // ============================================================================
@@ -1381,7 +1425,7 @@ async function loop(timestamp) {
             let signal, isSaturated;
             
             if (AppState.mode === 'camera') {
-                const result = SignalProcessor.processFrame(DOM.video, offCtx);
+                const result = SignalProcessor.processFrame(DOM.video, previewCtx);
                 signal = result.signal;
                 isSaturated = result.isSaturated;
                 DOM.saturationWarning.classList.toggle('hidden', !isSaturated);
@@ -1393,37 +1437,39 @@ async function loop(timestamp) {
             const result = BeatDetector.process(signal, timestamp, Config.bpmCalculationWindow);
             
             if (result.bpm > 0) {
-                const colorClass = AppState.mode === 'camera' ? "text-green-500" : "text-purple-500";
-                UI.updateBPMDisplay(result.bpm, colorClass);
+                UI.updateBPMDisplay(result.bpm);
             }
             
-            DOM.debugGain.innerText = SignalProcessor.currentGain.toFixed(1);
             AppState.addHistoryPoint(AppState.totalTime, signal, result.threshold, result.isBeat, result.bpm);
         }
     }
     
-    // Draw
     const data = AppState.mode === 'review' ? AppState.reviewData : AppState.history;
     if (data && data.length > 0) {
         const end = AppState.mode === 'review' ? AppState.reviewOffset : data.length;
-        const start = Math.max(0, end - DOM.canvas.width);
+        const start = Math.max(0, end - DOM.ppgCanvas.width);
         
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(0, 0, DOM.canvas.width, DOM.canvas.height);
-        Renderer.drawSignal(DOM.canvas, ctx, data, AppState.mode, start, end);
+        ppgCtx.fillStyle = '#0f172a';
+        ppgCtx.fillRect(0, 0, DOM.ppgCanvas.width, DOM.ppgCanvas.height);
+        Renderer.drawSignal(DOM.ppgCanvas, ppgCtx, data, AppState.mode, start, end);
         
         if (AppState.mode === 'review' && end > 0 && data[end - 1]) {
             const currentTime = data[end - 1].time;
             const totalTime = data[data.length - 1].time;
             DOM.reviewTimeDisplay.innerText = `-${(totalTime - currentTime).toFixed(1)}s`;
             
-            const values = data.slice(0, end).map(d => d.val);
-            const timestamps = data.slice(0, end).map(d => d.time);
-            const thresholds = BeatDetector.calculateThreshold(values);
-            const beatIndices = BeatDetector.detectBeats(values, thresholds);
-            const displayBpm = BeatDetector.calculateBPM(beatIndices, timestamps, Config.bpmCalculationWindow);
+            const recentBeats = [];
+            for (let i = end - 1; i >= 0 && recentBeats.length < Config.bpmCalculationWindow; i--) {
+                if (data[i].beat) {
+                    recentBeats.push(data[i].time);
+                }
+            }
             
-            if (displayBpm) UI.updateBPMDisplay(displayBpm, "text-amber-500");
+            if (recentBeats.length >= 2) {
+                const timeSpan = recentBeats[0] - recentBeats[recentBeats.length - 1];
+                const displayBpm = Math.round(60 * (recentBeats.length - 1) / timeSpan);
+                UI.updateBPMDisplay(displayBpm);
+            }
         }
     }
     
@@ -1462,10 +1508,10 @@ DOM.deleteOldestBtn.onclick = () => {
 };
 
 DOM.settingPreview.onchange = saveSettings;
-DOM.settingAutoStop.onchange = saveSettings;
+DOM.settingAutoStop.oninput = saveSettings;
 DOM.settingAutoSave.onchange = saveSettings;
-DOM.settingBpmWindow.onchange = saveSettings;
-DOM.settingMaxRecords.onchange = saveSettings;
+DOM.settingBpmWindow.oninput = saveSettings;
+DOM.settingMaxRecords.oninput = saveSettings;
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
@@ -1488,6 +1534,18 @@ window.onpagehide = () => {
     Camera.stop();
     WakeLock.release();
 };
+
+// ============================================================================
+// CANVAS RESIZE
+// ============================================================================
+function resizeCanvas() {
+    const container = DOM.ppgCanvas.parentElement;
+    DOM.ppgCanvas.width = container.clientWidth;
+    DOM.ppgCanvas.height = container.clientHeight;
+}
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
 
 // ============================================================================
 // INITIALIZATION
