@@ -45,6 +45,9 @@
             background: rgba(15, 23, 42, 0.8);
             border-bottom: 1px solid #334155;
             backdrop-filter: blur(12px);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         
         #canvasContainer {
@@ -143,10 +146,24 @@
             cursor: pointer;
         }
         
-        #cameraBtn { background: #0ea5e9; color: white; }
         #simulateBtn { background: #a855f7; color: white; }
-        #saveBtn { background: #10b981; color: white; }
         .btn-danger { background: #ef4444; color: white; }
+
+        #saveBtn {
+            position: absolute;
+            bottom: 16px;
+            right: 16px;
+            padding: 12px 24px;
+            background: #10b981;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 10;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
         
         input[type="range"] {
             width: 100%;
@@ -395,8 +412,8 @@
         <div id="instructionOverlay" class="overlay">
             <div>
                 <p><strong>Ready to Measure</strong></p>
-                <p>Go to the Record tab to start.</p>
-                <p><small><strong>Camera Mode:</strong> Cover the back camera & flash gently with your fingertip.</small></p>
+                <p>Tap screen to start recording.</p>
+                <p><small>Cover the back camera &amp; flash gently with your fingertip.</small></p>
             </div>
         </div>
 
@@ -407,6 +424,8 @@
         <div id="torchWarning" class="warning hidden" style="top: 48px;">
             <span>⚠️ Camera flash unavailable - Ensure good lighting</span>
         </div>
+
+        <button id="saveBtn" class="hidden">Save</button>
 
         <div id="reviewControls" class="review-controls">
             <div>
@@ -423,25 +442,11 @@
 
     <div class="controls">
         <div class="tabs">
-            <button id="tabRecord" class="tab active">Record</button>
-            <button id="tabHistory" class="tab">History</button>
+            <button id="tabHistory" class="tab active">History</button>
             <button id="tabSettings" class="tab">Settings</button>
         </div>
 
-        <div id="contentRecord" class="tab-content scroller">
-            <div class="btn-group">
-                <button id="cameraBtn">Camera</button>
-                <button id="simulateBtn">Simulate</button>
-                <button id="saveBtn">Save</button>
-            </div>
-            
-            <div id="simControls" class="hidden">
-                <label>Target BPM: <span id="targetBpmValue">75</span></label>
-                <input type="range" id="bpmSlider" min="40" max="220" value="75">
-            </div>
-        </div>
-
-        <div id="contentHistory" class="tab-content scroller hidden">
+        <div id="contentHistory" class="tab-content scroller">
             <div style="padding: 12px; border-bottom: 1px solid #334155; background: rgba(30, 41, 59, 0.3); margin: -16px -16px 16px -16px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <span style="font-size: 10px; font-weight: bold; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">Storage</span>
@@ -463,7 +468,7 @@
             <div id="savedList" class="recordings"></div>
             <div id="emptyState" class="hidden" style="text-align: center; color: #475569; padding: 48px 0;">
                 <div style="margin-bottom: 8px;">No recordings yet</div>
-                <div style="font-size: 12px; color: #334155;">Start recording in the Record tab</div>
+                <div style="font-size: 12px; color: #334155;">Tap the screen above to start recording</div>
             </div>
         </div>
 
@@ -502,6 +507,19 @@
                 <input type="checkbox" id="settingAutoSave" class="toggle-checkbox">
             </div>
             
+            <div class="setting-row">
+                <label>
+                    Simulate Mode
+                    <small>Generate synthetic heart rate signal</small>
+                </label>
+                <button id="simulateBtn">Simulate</button>
+            </div>
+
+            <div id="simControls">
+                <label>Target BPM: <span id="targetBpmValue">75</span></label>
+                <input type="range" id="bpmSlider" min="40" max="220" value="75">
+            </div>
+
             <div class="camera-stats">
                 <h4>Camera Specs</h4>
                 <div id="cameraStats">
@@ -617,14 +635,11 @@ const DOM = {
     reviewTimeDisplay: document.getElementById('reviewTimeDisplay'),
     historySlider: document.getElementById('historySlider'),
     
-    tabRecord: document.getElementById('tabRecord'),
     tabHistory: document.getElementById('tabHistory'),
     tabSettings: document.getElementById('tabSettings'),
-    contentRecord: document.getElementById('contentRecord'),
     contentHistory: document.getElementById('contentHistory'),
     contentSettings: document.getElementById('contentSettings'),
-    
-    cameraBtn: document.getElementById('cameraBtn'),
+
     simulateBtn: document.getElementById('simulateBtn'),
     saveBtn: document.getElementById('saveBtn'),
     backToLiveBtn: document.getElementById('backToLiveBtn'),
@@ -1132,11 +1147,8 @@ const UI = {
     switchTab(tab) {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
-        
-        if (tab === 'record') {
-            DOM.tabRecord.classList.add('active');
-            DOM.contentRecord.classList.remove('hidden');
-        } else if (tab === 'history') {
+
+        if (tab === 'history') {
             DOM.tabHistory.classList.add('active');
             DOM.contentHistory.classList.remove('hidden');
             renderRecordingsList();
@@ -1174,9 +1186,9 @@ const UI = {
     },
     
     updateButtonsForMode(mode) {
-        DOM.cameraBtn.innerText = mode === 'camera' ? 'Stop' : 'Camera';
         DOM.simulateBtn.innerText = mode === 'simulate' ? 'Stop' : 'Simulate';
-        DOM.saveBtn.disabled = mode !== 'idle' || AppState.history.length === 0;
+        const canSave = mode === 'idle' && AppState.history.length > 0;
+        DOM.saveBtn.classList.toggle('hidden', !canSave);
     }
 };
 
@@ -1206,7 +1218,6 @@ async function setMode(newMode) {
         DOM.reviewControls.classList.remove('active');
         DOM.saturationWarning.classList.add('hidden');
         DOM.torchWarning.classList.add('hidden');
-        DOM.simControls.classList.add('hidden');
         UI.updateBPMDisplay(0);
         
     } else if (newMode === 'camera') {
@@ -1222,7 +1233,6 @@ async function setMode(newMode) {
         DOM.instructionOverlay.classList.add('hidden');
         DOM.modeBadge.classList.remove('hidden');
         DOM.modeBadge.innerText = 'CAMERA';
-        DOM.simControls.classList.add('hidden');
         
         const track = Camera.stream.getVideoTracks()[0];
         UI.updateCameraStats(track);
@@ -1235,14 +1245,12 @@ async function setMode(newMode) {
         DOM.instructionOverlay.classList.add('hidden');
         DOM.modeBadge.classList.remove('hidden');
         DOM.modeBadge.innerText = 'SIMULATE';
-        DOM.simControls.classList.remove('hidden');
         
     } else if (newMode === 'review') {
         DOM.instructionOverlay.classList.add('hidden');
         DOM.reviewControls.classList.add('active');
         DOM.modeBadge.classList.remove('hidden');
         DOM.modeBadge.innerText = 'REVIEW';
-        DOM.simControls.classList.add('hidden');
     }
     
     UI.updateButtonsForMode(newMode);
@@ -1479,7 +1487,6 @@ async function loop(timestamp) {
 // ============================================================================
 // EVENT LISTENERS
 // ============================================================================
-DOM.tabRecord.onclick = () => UI.switchTab('record');
 DOM.tabHistory.onclick = () => UI.switchTab('history');
 DOM.tabSettings.onclick = () => UI.switchTab('settings');
 
@@ -1489,7 +1496,6 @@ DOM.bpmSlider.oninput = e => {
     DOM.targetBpmValue.innerText = AppState.simBpm;
 };
 
-DOM.cameraBtn.onclick = () => setMode(AppState.mode === 'camera' ? 'idle' : 'camera');
 DOM.simulateBtn.onclick = () => setMode(AppState.mode === 'simulate' ? 'idle' : 'simulate');
 DOM.saveBtn.onclick = saveRecording;
 DOM.backToLiveBtn.onclick = () => setMode('idle');
@@ -1521,8 +1527,6 @@ document.addEventListener('visibilitychange', () => {
             WakeLock.release();
             AppState.mode = 'idle';
             DOM.modeBadge.innerText = "PAUSED";
-            DOM.saveBtn.disabled = false;
-            DOM.saveBtn.innerText = "Save Partial";
             UI.updateButtonsForMode('idle');
         }
     } else {
@@ -1548,11 +1552,35 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 // ============================================================================
+// CANVAS TAP TO RECORD
+// ============================================================================
+document.getElementById('canvasContainer').addEventListener('touchstart', e => {
+    const mode = AppState.mode;
+    if (mode === 'review') return;
+    e.preventDefault();
+    if (mode === 'idle') {
+        setMode('camera');
+    } else if (mode === 'camera' || mode === 'simulate') {
+        setMode('idle');
+    }
+}, { passive: false });
+
+document.getElementById('canvasContainer').addEventListener('click', e => {
+    const mode = AppState.mode;
+    if (mode === 'review') return;
+    if (mode === 'idle') {
+        setMode('camera');
+    } else if (mode === 'camera' || mode === 'simulate') {
+        setMode('idle');
+    }
+});
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 loadSettings();
 renderRecordingsList();
-UI.switchTab('record');
+UI.switchTab('history');
 loop(performance.now());
 
 // ============================================================================
