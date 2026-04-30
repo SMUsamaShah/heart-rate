@@ -55,7 +55,7 @@ const CONSTANTS = {
 };
 
 const Config = {
-    showPreview: false,
+    showPreview: true,
     autoStopSeconds: 0,
     autoSave: false,
     bpmCalculationWindow: CONSTANTS.BPM.DEFAULT_WINDOW,
