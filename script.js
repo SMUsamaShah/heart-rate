@@ -360,8 +360,10 @@ const BeatDetector = {
         
         let isBeat = false;
 
-        // Fire at the peak (signal above threshold and now declining), not on the rising edge
-        if (signal > this.threshold &&
+        // Fire when the previous sample was above threshold and signal is now declining.
+        // Using prevSignal > threshold (not current signal) handles narrow peaks where
+        // the only above-threshold sample is immediately followed by a drop below threshold.
+        if (this.prevSignal > this.threshold &&
             signal < this.prevSignal &&
             (timestamp - this.lastBeatTime) > this.refractoryPeriod &&
             this.runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE) {
@@ -423,16 +425,18 @@ const BeatDetector = {
         let lastBeatIndex = -1000;
 
         for (let i = 1; i < samples.length; i++) {
-            const { threshold, runningMax } = thresholds[i];
+            const { runningMax } = thresholds[i];
+            const prevThreshold = thresholds[i - 1].threshold;
             const val = samples[i];
             const prevVal = samples[i - 1];
 
-            // Peak detection: signal above threshold and declining (just past the peak)
-            if (val > threshold &&
+            // Same logic as process(): fire when previous sample was above threshold
+            // and signal is now declining. Handles narrow single-sample peaks.
+            if (prevVal > prevThreshold &&
                 val < prevVal &&
                 (i - lastBeatIndex) > CONSTANTS.BEAT_DETECTION.MIN_GAP_SAMPLES &&
                 runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE) {
-                beatIndices.push(i - 1); // mark at the actual peak sample
+                beatIndices.push(i - 1); // mark at the peak sample
                 lastBeatIndex = i - 1;
             }
         }
@@ -913,12 +917,17 @@ async function loop(timestamp) {
             }
             
             const result = BeatDetector.process(signal, timestamp, Config.bpmCalculationWindow);
-            
+
             if (result.bpm > 0) {
                 UI.updateBPMDisplay(result.bpm);
             }
-            
-            AppState.addHistoryPoint(AppState.totalTime, signal, result.threshold, result.isBeat, result.bpm);
+
+            // Beat fires one sample after the peak (on the declining edge).
+            // Retroactively mark the previous history entry so the dot sits on the peak.
+            if (result.isBeat && AppState.history.length > 0) {
+                AppState.history[AppState.history.length - 1].beat = true;
+            }
+            AppState.addHistoryPoint(AppState.totalTime, signal, result.threshold, false, result.bpm);
         }
     }
     
