@@ -147,7 +147,6 @@
         }
         
         #simulateBtn { background: #a855f7; color: white; }
-        .btn-danger { background: #ef4444; color: white; }
 
         #saveBtn {
             position: absolute;
@@ -390,6 +389,62 @@
         .toggle-checkbox:checked::before {
             left: 22px;
         }
+
+        #installBanner {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(15, 23, 42, 0.97);
+            border-top: 1px solid #0ea5e9;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 100;
+        }
+
+        #installBanner.hidden { display: none; }
+
+        #installBanner .install-text {
+            flex: 1;
+            min-width: 0;
+        }
+
+        #installBanner .install-text strong {
+            display: block;
+            font-size: 13px;
+            color: var(--text-color);
+        }
+
+        #installBanner .install-text small {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: block;
+        }
+
+        #installBtn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        #installDismissBtn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 22px;
+            cursor: pointer;
+            padding: 0 4px;
+            flex-shrink: 0;
+            line-height: 1;
+        }
     </style>
 </head>
 <body>
@@ -426,6 +481,15 @@
         </div>
 
         <button id="saveBtn" class="hidden">Save</button>
+
+        <div id="installBanner" class="hidden">
+            <div class="install-text">
+                <strong>Install Pulse Monitor</strong>
+                <small id="installHint">Add to home screen for quick access</small>
+            </div>
+            <button id="installBtn">Install</button>
+            <button id="installDismissBtn" aria-label="Dismiss">&#x2715;</button>
+        </div>
 
         <div id="reviewControls" class="review-controls">
             <div>

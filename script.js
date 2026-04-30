@@ -6,7 +6,6 @@ const CONSTANTS = {
     
     SIGNAL: {
         WARMUP_FRAMES: 30,
-        MAX_HISTORY_LENGTH: 10800,
         NORMALIZATION_WINDOW: 120,
         GAIN_SMOOTHING: 0.95,
         TARGET_GAIN_RANGE: 0.7,
@@ -110,7 +109,6 @@ const DOM = {
     exportJsonBtn: document.getElementById('exportJsonBtn'),
     deleteOldestBtn: document.getElementById('deleteOldestBtn'),
     
-    simControls: document.getElementById('simControls'),
     bpmSlider: document.getElementById('bpmSlider'),
     targetBpmValue: document.getElementById('targetBpmValue'),
     savedList: document.getElementById('savedList'),
@@ -1052,4 +1050,55 @@ loop(performance.now());
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
+
+// ============================================================================
+// PWA INSTALL PROMPT
+// ============================================================================
+(function() {
+    const DISMISS_KEY = 'pwa-install-dismissed';
+    if (localStorage.getItem(DISMISS_KEY)) return;
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) return;
+
+    const banner = document.getElementById('installBanner');
+    const installBtn = document.getElementById('installBtn');
+    const dismissBtn = document.getElementById('installDismissBtn');
+    const hint = document.getElementById('installHint');
+
+    let deferredPrompt = null;
+
+    function showBanner() { banner.classList.remove('hidden'); }
+    function hideBanner() {
+        banner.classList.add('hidden');
+        localStorage.setItem(DISMISS_KEY, '1');
+    }
+
+    dismissBtn.addEventListener('click', hideBanner);
+
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+
+    if (isIOS) {
+        hint.textContent = 'Tap the Share button, then "Add to Home Screen"';
+        installBtn.textContent = 'How?';
+        installBtn.addEventListener('click', () => {
+            alert('To install:\n1. Tap the Share button (⬆) at the bottom of Safari\n2. Scroll down and tap "Add to Home Screen"\n3. Tap "Add"');
+        });
+        setTimeout(showBanner, 1500);
+    } else {
+        window.addEventListener('beforeinstallprompt', e => {
+            e.preventDefault();
+            deferredPrompt = e;
+            setTimeout(showBanner, 500);
+        });
+
+        installBtn.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            deferredPrompt = null;
+            hideBanner();
+        });
+
+        window.addEventListener('appinstalled', hideBanner);
+    }
+})();
 
