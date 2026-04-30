@@ -57,7 +57,7 @@ const CONSTANTS = {
 const Config = {
     showPreview: true,
     autoStopSeconds: 0,
-    autoSave: false,
+    autoSave: true,
     bpmCalculationWindow: CONSTANTS.BPM.DEFAULT_WINDOW,
     maxRecords: 50,
     
