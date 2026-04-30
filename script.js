@@ -18,7 +18,7 @@ const CONSTANTS = {
         MIN_GAP_SAMPLES: 15,
         MIN_AMPLITUDE: 0.15,
         DECAY_RATE: 0.99,
-        THRESHOLD_MULTIPLIER: 0.5,
+        THRESHOLD_MULTIPLIER: 0.45,
         BASE_THRESHOLD: 0.05,
         REFRACTORY_PERIOD_MS: 250,
         REFRACTORY_MIN_MS: 250,
@@ -337,7 +337,8 @@ const BeatDetector = {
     threshold: CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD,
     detectedBeats: [],
     bpm: 0,
-    
+    prevSignal: 0,
+
     reset() {
         this.lastBeatTime = 0;
         this.refractoryPeriod = CONSTANTS.BEAT_DETECTION.REFRACTORY_PERIOD_MS;
@@ -345,6 +346,7 @@ const BeatDetector = {
         this.threshold = CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD;
         this.detectedBeats = [];
         this.bpm = 0;
+        this.prevSignal = 0;
     },
     
     process(signal, timestamp, bpmWindow) {
@@ -357,11 +359,13 @@ const BeatDetector = {
         if (signal > this.runningMax) this.runningMax = signal;
         
         let isBeat = false;
-        
-        if (signal > this.threshold && 
+
+        // Fire at the peak (signal above threshold and now declining), not on the rising edge
+        if (signal > this.threshold &&
+            signal < this.prevSignal &&
             (timestamp - this.lastBeatTime) > this.refractoryPeriod &&
             this.runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE) {
-            
+
             this.lastBeatTime = timestamp;
             isBeat = true;
             this.detectedBeats.push(timestamp);
@@ -391,10 +395,11 @@ const BeatDetector = {
                 );
             }
         }
-        
+
+        this.prevSignal = signal;
         return { isBeat, threshold: this.threshold, bpm: Math.round(this.bpm) };
     },
-    
+
     calculateThreshold(samples) {
         let runningMax = 0.1;
         const results = [];
@@ -416,18 +421,22 @@ const BeatDetector = {
     detectBeats(samples, thresholds) {
         const beatIndices = [];
         let lastBeatIndex = -1000;
-        
-        samples.forEach((val, i) => {
+
+        for (let i = 1; i < samples.length; i++) {
             const { threshold, runningMax } = thresholds[i];
-            
-            if (val > threshold && 
-                (i - lastBeatIndex) > CONSTANTS.BEAT_DETECTION.MIN_GAP_SAMPLES && 
+            const val = samples[i];
+            const prevVal = samples[i - 1];
+
+            // Peak detection: signal above threshold and declining (just past the peak)
+            if (val > threshold &&
+                val < prevVal &&
+                (i - lastBeatIndex) > CONSTANTS.BEAT_DETECTION.MIN_GAP_SAMPLES &&
                 runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE) {
-                beatIndices.push(i);
-                lastBeatIndex = i;
+                beatIndices.push(i - 1); // mark at the actual peak sample
+                lastBeatIndex = i - 1;
             }
-        });
-        
+        }
+
         return beatIndices;
     },
     
