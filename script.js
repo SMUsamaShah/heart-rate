@@ -6,7 +6,6 @@ const CONSTANTS = {
     
     SIGNAL: {
         WARMUP_FRAMES: 30,
-        MAX_HISTORY_LENGTH: 10800,
         NORMALIZATION_WINDOW: 120,
         GAIN_SMOOTHING: 0.95,
         TARGET_GAIN_RANGE: 0.7,
@@ -110,7 +109,6 @@ const DOM = {
     exportJsonBtn: document.getElementById('exportJsonBtn'),
     deleteOldestBtn: document.getElementById('deleteOldestBtn'),
     
-    simControls: document.getElementById('simControls'),
     bpmSlider: document.getElementById('bpmSlider'),
     targetBpmValue: document.getElementById('targetBpmValue'),
     savedList: document.getElementById('savedList'),
