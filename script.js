@@ -62,6 +62,11 @@ const CONSTANTS = {
         BUFFER_SIZE: 256,
         MIN_BPM: 30,
         MAX_BPM: 240
+    },
+
+    DISPLAY: {
+        WINDOW_SECONDS: 15,
+        HISTORY_SECONDS: 25
     }
 };
 
@@ -164,7 +169,8 @@ const AppState = {
     
     addHistoryPoint(time, val, threshold, isBeat, bpm) {
         this.history.push({ time, val, threshold, beat: isBeat, bpm });
-        if (this.history.length > DOM.ppgCanvas.width * 2) {
+        const cutoff = time - CONSTANTS.DISPLAY.HISTORY_SECONDS;
+        while (this.history.length > 1 && this.history[0].time < cutoff) {
             this.history.shift();
         }
     },
@@ -618,48 +624,48 @@ const BeatDetector = {
 // RENDERER
 // ============================================================================
 const Renderer = {
-    drawSignal(canvas, ppgCtx, data, mode, viewStart, viewEnd) {
-        if (!data || !data.length) return;
-        
-        const viewData = data.slice(viewStart, viewEnd);
-        if (!viewData.length) return;
+    drawSignal(canvas, ppgCtx, data, mode, end) {
+        if (!data || !data.length || end === 0) return;
 
         const cy = canvas.height / 2;
         const sy = canvas.height / 2.2;
         const color = mode === 'simulate' ? '#a855f7' : (mode === 'review' ? '#f59e0b' : '#ef4444');
-        
+        const pps = canvas.width / CONSTANTS.DISPLAY.WINDOW_SECONDS;
+        const latestTime = data[end - 1].time;
+        const windowStart = latestTime - CONSTANTS.DISPLAY.WINDOW_SECONDS;
+
         ppgCtx.textAlign = "center";
         ppgCtx.textBaseline = "bottom";
         ppgCtx.font = "9px monospace";
-        
+
+        // Time marker grid lines (computed from time, not from data indices)
+        ppgCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ppgCtx.fillStyle = 'rgba(255,255,255,0.3)';
+        for (let s = Math.ceil(windowStart); s <= Math.floor(latestTime); s++) {
+            const x = (s - windowStart) * pps;
+            ppgCtx.beginPath();
+            ppgCtx.moveTo(x, 0);
+            ppgCtx.lineTo(x, canvas.height);
+            ppgCtx.stroke();
+            ppgCtx.fillText(s + 's', x, canvas.height - 2);
+        }
+
         const signalPath = [];
         const thresholdPath = [];
         const beatMarkers = [];
-        
-        for (let i = 0; i < viewData.length; i++) {
-            const d = viewData[i];
+
+        for (let i = 0; i < end; i++) {
+            const d = data[i];
+            const x = (d.time - windowStart) * pps;
+            if (x < 0) continue;
             const y = cy - d.val * sy;
-            
-            signalPath.push({ x: i, y });
-            thresholdPath.push({ x: i, y: cy - d.threshold * sy });
-            
-            if (d.beat) beatMarkers.push({ x: i, y });
-            
-            if (i > 0) {
-                const prevTime = viewData[i - 1].time;
-                if (Math.floor(d.time) !== Math.floor(prevTime)) {
-                    ppgCtx.beginPath();
-                    ppgCtx.strokeStyle = 'rgba(255,255,255,0.15)';
-                    ppgCtx.moveTo(i, 0);
-                    ppgCtx.lineTo(i, canvas.height);
-                    ppgCtx.stroke();
-                    
-                    ppgCtx.fillStyle = 'rgba(255,255,255,0.3)';
-                    ppgCtx.fillText(Math.floor(d.time) + 's', i, canvas.height - 2);
-                }
-            }
+            signalPath.push({ x, y });
+            thresholdPath.push({ x, y: cy - d.threshold * sy });
+            if (d.beat) beatMarkers.push({ x, y });
         }
-        
+
+        if (!signalPath.length) return;
+
         ppgCtx.beginPath();
         ppgCtx.strokeStyle = 'rgba(255,200,0,0.3)';
         ppgCtx.setLineDash([4, 4]);
@@ -668,7 +674,7 @@ const Renderer = {
         });
         ppgCtx.stroke();
         ppgCtx.setLineDash([]);
-        
+
         ppgCtx.beginPath();
         ppgCtx.strokeStyle = color;
         ppgCtx.lineWidth = 2;
@@ -676,12 +682,14 @@ const Renderer = {
             i === 0 ? ppgCtx.moveTo(p.x, p.y) : ppgCtx.lineTo(p.x, p.y);
         });
         ppgCtx.stroke();
-        
-        ppgCtx.lineTo(viewData.length - 1, canvas.height);
-        ppgCtx.lineTo(0, canvas.height);
+
+        const last = signalPath[signalPath.length - 1];
+        const first = signalPath[0];
+        ppgCtx.lineTo(last.x, canvas.height);
+        ppgCtx.lineTo(first.x, canvas.height);
         ppgCtx.fillStyle = color + "20";
         ppgCtx.fill();
-        
+
         ppgCtx.fillStyle = "#fff";
         beatMarkers.forEach(p => {
             ppgCtx.beginPath();
@@ -1120,11 +1128,10 @@ async function loop(timestamp) {
     const data = AppState.mode === 'review' ? AppState.reviewData : AppState.history;
     if (data && data.length > 0) {
         const end = AppState.mode === 'review' ? AppState.reviewOffset : data.length;
-        const start = Math.max(0, end - DOM.ppgCanvas.width);
-        
+
         ppgCtx.fillStyle = '#0f172a';
         ppgCtx.fillRect(0, 0, DOM.ppgCanvas.width, DOM.ppgCanvas.height);
-        Renderer.drawSignal(DOM.ppgCanvas, ppgCtx, data, AppState.mode, start, end);
+        Renderer.drawSignal(DOM.ppgCanvas, ppgCtx, data, AppState.mode, end);
         
         if (AppState.mode === 'review' && end > 0 && data[end - 1]) {
             const currentTime = data[end - 1].time;
