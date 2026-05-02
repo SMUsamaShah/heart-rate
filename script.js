@@ -51,6 +51,17 @@ const CONSTANTS = {
     
     CAMERA: {
         PREVIEW_SIZE: 30
+    },
+
+    FILTER: {
+        HP_CUTOFF_HZ: 0.5,
+        LP_CUTOFF_HZ: 4.0
+    },
+
+    FFT: {
+        BUFFER_SIZE: 256,
+        MIN_BPM: 30,
+        MAX_BPM: 240
     }
 };
 
@@ -324,6 +335,148 @@ const SignalProcessor = {
             Math.sin(totalTime) * CONSTANTS.SIMULATION.NOISE_AMPLITUDE;
         
         return this.normalize(signal * CONSTANTS.SIMULATION.SIGNAL_SCALE);
+    }
+};
+
+// ============================================================================
+// BANDPASS FILTER
+// ============================================================================
+const BandpassFilter = {
+    hp_prev_x: 0,
+    hp_prev_y: 0,
+    lp_prev_y: 0,
+
+    reset() {
+        this.hp_prev_x = 0;
+        this.hp_prev_y = 0;
+        this.lp_prev_y = 0;
+    },
+
+    process(x, dt) {
+        const dt_s = Math.max(0.001, Math.min(dt, 0.1));
+
+        // First-order high-pass: removes DC drift and baseline wander
+        const hp_rc = 1 / (2 * Math.PI * CONSTANTS.FILTER.HP_CUTOFF_HZ);
+        const hp_alpha = hp_rc / (hp_rc + dt_s);
+        const hp_y = hp_alpha * (this.hp_prev_y + x - this.hp_prev_x);
+        this.hp_prev_x = x;
+        this.hp_prev_y = hp_y;
+
+        // First-order low-pass: removes motion noise and high-frequency artifacts
+        const lp_rc = 1 / (2 * Math.PI * CONSTANTS.FILTER.LP_CUTOFF_HZ);
+        const lp_alpha = dt_s / (lp_rc + dt_s);
+        const lp_y = lp_alpha * hp_y + (1 - lp_alpha) * this.lp_prev_y;
+        this.lp_prev_y = lp_y;
+
+        return lp_y;
+    }
+};
+
+// ============================================================================
+// FFT + FFT ANALYZER
+// ============================================================================
+
+// Radix-2 Cooley-Tukey FFT. Applies a Hann window then returns the first N/2
+// magnitude bins. N must be a power of two.
+function fftMagnitude(signal) {
+    const N = signal.length;
+    const real = new Float32Array(N);
+    const imag = new Float32Array(N);
+
+    // Copy with Hann window applied
+    for (let i = 0; i < N; i++) {
+        const w = 0.5 * (1 - Math.cos(2 * Math.PI * i / (N - 1)));
+        real[i] = signal[i] * w;
+    }
+
+    // Bit-reversal permutation
+    for (let i = 1, j = 0; i < N; i++) {
+        let bit = N >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+            [real[i], real[j]] = [real[j], real[i]];
+        }
+    }
+
+    // Butterfly passes
+    for (let len = 2; len <= N; len <<= 1) {
+        const ang = -2 * Math.PI / len;
+        const cosA = Math.cos(ang);
+        const sinA = Math.sin(ang);
+        for (let i = 0; i < N; i += len) {
+            let wR = 1, wI = 0;
+            for (let j = 0; j < (len >> 1); j++) {
+                const uR = real[i + j], uI = imag[i + j];
+                const xR = real[i + j + (len >> 1)], xI = imag[i + j + (len >> 1)];
+                const vR = wR * xR - wI * xI;
+                const vI = wR * xI + wI * xR;
+                real[i + j]              = uR + vR;
+                imag[i + j]              = uI + vI;
+                real[i + j + (len >> 1)] = uR - vR;
+                imag[i + j + (len >> 1)] = uI - vI;
+                const newWR = wR * cosA - wI * sinA;
+                wI = wR * sinA + wI * cosA;
+                wR = newWR;
+            }
+        }
+    }
+
+    // Magnitudes for positive frequencies only
+    const mags = new Float32Array(N >> 1);
+    for (let i = 0; i < (N >> 1); i++) {
+        mags[i] = Math.sqrt(real[i] * real[i] + imag[i] * imag[i]);
+    }
+    return mags;
+}
+
+const FFTAnalyzer = {
+    buffer: [],
+    timestamps: [],
+
+    reset() {
+        this.buffer = [];
+        this.timestamps = [];
+    },
+
+    addSample(val, timestampMs) {
+        this.buffer.push(val);
+        this.timestamps.push(timestampMs);
+        if (this.buffer.length > CONSTANTS.FFT.BUFFER_SIZE) {
+            this.buffer.shift();
+            this.timestamps.shift();
+        }
+    },
+
+    computeBPM() {
+        const N = CONSTANTS.FFT.BUFFER_SIZE;
+        if (this.buffer.length < N) return 0;
+
+        // Compute actual sample rate from timestamp span
+        const spanMs = this.timestamps[N - 1] - this.timestamps[0];
+        if (spanMs <= 0) return 0;
+        const sampleRate = (N - 1) / (spanMs / 1000);
+
+        const mags = fftMagnitude(this.buffer);
+
+        const minBin = Math.ceil(CONSTANTS.FFT.MIN_BPM / 60 * N / sampleRate);
+        const maxBin = Math.min(Math.floor(CONSTANTS.FFT.MAX_BPM / 60 * N / sampleRate), (N >> 1) - 1);
+
+        let peakBin = minBin, peakMag = 0;
+        for (let i = minBin; i <= maxBin; i++) {
+            if (mags[i] > peakMag) { peakMag = mags[i]; peakBin = i; }
+        }
+
+        // Parabolic interpolation for sub-bin frequency accuracy
+        let trueBin = peakBin;
+        if (peakBin > minBin && peakBin < maxBin) {
+            const denom = 2 * mags[peakBin] - mags[peakBin - 1] - mags[peakBin + 1];
+            if (denom > 0) {
+                trueBin = peakBin + 0.5 * (mags[peakBin + 1] - mags[peakBin - 1]) / denom;
+            }
+        }
+
+        return Math.round(trueBin * sampleRate / N * 60);
     }
 };
 
@@ -704,6 +857,8 @@ async function setMode(newMode) {
         AppState.clearHistory();
         SignalProcessor.reset();
         BeatDetector.reset();
+        BandpassFilter.reset();
+        FFTAnalyzer.reset();
         DOM.instructionOverlay.classList.add('hidden');
         DOM.modeBadge.classList.remove('hidden');
         DOM.modeBadge.innerText = 'CAMERA';
@@ -716,6 +871,8 @@ async function setMode(newMode) {
         AppState.simPhase = 0;
         SignalProcessor.reset();
         BeatDetector.reset();
+        BandpassFilter.reset();
+        FFTAnalyzer.reset();
         DOM.instructionOverlay.classList.add('hidden');
         DOM.modeBadge.classList.remove('hidden');
         DOM.modeBadge.innerText = 'SIMULATE';
@@ -866,14 +1023,27 @@ function openReview(recording) {
     
     const values = recording.samples.map(s => s.v);
     const timestamps = recording.samples.map(s => s.t);
-    
-    const thresholds = BeatDetector.calculateThreshold(values);
-    const beatIndices = BeatDetector.detectBeats(values, thresholds);
-    const calculatedBpm = BeatDetector.calculateBPM(beatIndices, timestamps, Config.bpmCalculationWindow);
+
+    // Apply the same bandpass filter used during recording so beat detection
+    // and the waveform display are consistent with real-time mode
+    BandpassFilter.reset();
+    const filtered = values.map((v, i) => {
+        const dt = i === 0 ? 1 / 30 : (timestamps[i] - timestamps[i - 1]);
+        return BandpassFilter.process(v, dt);
+    });
+
+    const thresholds = BeatDetector.calculateThreshold(filtered);
+    const beatIndices = BeatDetector.detectBeats(filtered, thresholds);
+
+    // Use FFT BPM for review if the recording is long enough
+    FFTAnalyzer.reset();
+    filtered.forEach((v, i) => FFTAnalyzer.addSample(v, timestamps[i] * 1000));
+    const fftBpm = FFTAnalyzer.computeBPM();
+    const calculatedBpm = fftBpm || BeatDetector.calculateBPM(beatIndices, timestamps, Config.bpmCalculationWindow);
 
     AppState.reviewData = recording.samples.map((sample, i) => ({
         time: sample.t,
-        val: sample.v,
+        val: filtered[i],
         threshold: thresholds[i].threshold,
         beat: beatIndices.includes(i),
         bpm: calculatedBpm || recording.avgBpm
@@ -916,10 +1086,18 @@ async function loop(timestamp) {
                 signal = SignalProcessor.generateSimulation(AppState.simPhase, AppState.simBpm, AppState.totalTime);
             }
             
-            const result = BeatDetector.process(signal, timestamp, Config.bpmCalculationWindow);
+            // Bandpass filter removes DC drift and motion noise before detection
+            const filtered = BandpassFilter.process(signal, dt);
+            FFTAnalyzer.addSample(filtered, timestamp);
 
-            if (result.bpm > 0) {
-                UI.updateBPMDisplay(result.bpm);
+            const result = BeatDetector.process(filtered, timestamp, Config.bpmCalculationWindow);
+
+            // FFT BPM is more stable once the buffer warms up (~8.5 s); fall back to
+            // inter-beat-interval BPM before that
+            const fftBpm = FFTAnalyzer.computeBPM();
+            const displayBpm = fftBpm > 0 ? fftBpm : result.bpm;
+            if (displayBpm > 0) {
+                UI.updateBPMDisplay(displayBpm);
             }
 
             // Beat fires one sample after the peak (on the declining edge).
@@ -927,7 +1105,7 @@ async function loop(timestamp) {
             if (result.isBeat && AppState.history.length > 0) {
                 AppState.history[AppState.history.length - 1].beat = true;
             }
-            AppState.addHistoryPoint(AppState.totalTime, signal, result.threshold, false, result.bpm);
+            AppState.addHistoryPoint(AppState.totalTime, filtered, result.threshold, false, displayBpm);
         }
     }
     
