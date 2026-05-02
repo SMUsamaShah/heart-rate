@@ -69,6 +69,7 @@ const Config = {
     showPreview: true,
     autoStopSeconds: 0,
     autoSave: true,
+    useFFT: false,
     bpmCalculationWindow: CONSTANTS.BPM.DEFAULT_WINDOW,
     maxRecords: 50,
     
@@ -89,6 +90,7 @@ const Config = {
             autoStopSeconds: this.autoStopSeconds,
             bpmCalculationWindow: this.bpmCalculationWindow,
             autoSave: this.autoSave,
+            useFFT: this.useFFT,
             maxRecords: this.maxRecords
         };
         localStorage.setItem(CONSTANTS.STORAGE.SETTINGS_KEY, JSON.stringify(data));
@@ -127,6 +129,7 @@ const DOM = {
     settingPreview: document.getElementById('settingPreview'),
     settingAutoStop: document.getElementById('settingAutoStop'),
     settingAutoSave: document.getElementById('settingAutoSave'),
+    settingUseFFT: document.getElementById('settingUseFFT'),
     settingBpmWindow: document.getElementById('settingBpmWindow'),
     settingMaxRecords: document.getElementById('settingMaxRecords'),
     
@@ -960,6 +963,7 @@ function loadSettings() {
     DOM.settingPreview.checked = Config.showPreview;
     DOM.settingAutoStop.value = Config.autoStopSeconds;
     DOM.settingAutoSave.checked = Config.autoSave;
+    DOM.settingUseFFT.checked = Config.useFFT;
     DOM.settingBpmWindow.value = Config.bpmCalculationWindow;
     DOM.settingMaxRecords.value = Config.maxRecords;
     DOM.previewCanvas.classList.toggle('hidden', !Config.showPreview);
@@ -1024,26 +1028,29 @@ function openReview(recording) {
     const values = recording.samples.map(s => s.v);
     const timestamps = recording.samples.map(s => s.t);
 
-    // Apply the same bandpass filter used during recording so beat detection
-    // and the waveform display are consistent with real-time mode
-    BandpassFilter.reset();
-    const filtered = values.map((v, i) => {
-        const dt = i === 0 ? 1 / 30 : (timestamps[i] - timestamps[i - 1]);
-        return BandpassFilter.process(v, dt);
-    });
+    let analysisValues = values;
+    if (Config.useFFT) {
+        BandpassFilter.reset();
+        analysisValues = values.map((v, i) => {
+            const dt = i === 0 ? 1 / 30 : (timestamps[i] - timestamps[i - 1]);
+            return BandpassFilter.process(v, dt);
+        });
+    }
 
-    const thresholds = BeatDetector.calculateThreshold(filtered);
-    const beatIndices = BeatDetector.detectBeats(filtered, thresholds);
+    const thresholds = BeatDetector.calculateThreshold(analysisValues);
+    const beatIndices = BeatDetector.detectBeats(analysisValues, thresholds);
 
-    // Use FFT BPM for review if the recording is long enough
-    FFTAnalyzer.reset();
-    filtered.forEach((v, i) => FFTAnalyzer.addSample(v, timestamps[i] * 1000));
-    const fftBpm = FFTAnalyzer.computeBPM();
-    const calculatedBpm = fftBpm || BeatDetector.calculateBPM(beatIndices, timestamps, Config.bpmCalculationWindow);
+    let calculatedBpm = BeatDetector.calculateBPM(beatIndices, timestamps, Config.bpmCalculationWindow);
+    if (Config.useFFT) {
+        FFTAnalyzer.reset();
+        analysisValues.forEach((v, i) => FFTAnalyzer.addSample(v, timestamps[i] * 1000));
+        const fftBpm = FFTAnalyzer.computeBPM();
+        if (fftBpm > 0) calculatedBpm = fftBpm;
+    }
 
     AppState.reviewData = recording.samples.map((sample, i) => ({
         time: sample.t,
-        val: filtered[i],
+        val: sample.v,
         threshold: thresholds[i].threshold,
         beat: beatIndices.includes(i),
         bpm: calculatedBpm || recording.avgBpm
@@ -1086,15 +1093,15 @@ async function loop(timestamp) {
                 signal = SignalProcessor.generateSimulation(AppState.simPhase, AppState.simBpm, AppState.totalTime);
             }
             
-            // Bandpass filter removes DC drift and motion noise before detection
-            const filtered = BandpassFilter.process(signal, dt);
-            FFTAnalyzer.addSample(filtered, timestamp);
+            let processedSignal = signal;
+            if (Config.useFFT) {
+                processedSignal = BandpassFilter.process(signal, dt);
+                FFTAnalyzer.addSample(processedSignal, timestamp);
+            }
 
-            const result = BeatDetector.process(filtered, timestamp, Config.bpmCalculationWindow);
+            const result = BeatDetector.process(processedSignal, timestamp, Config.bpmCalculationWindow);
 
-            // FFT BPM is more stable once the buffer warms up (~8.5 s); fall back to
-            // inter-beat-interval BPM before that
-            const fftBpm = FFTAnalyzer.computeBPM();
+            const fftBpm = Config.useFFT ? FFTAnalyzer.computeBPM() : 0;
             const displayBpm = fftBpm > 0 ? fftBpm : result.bpm;
             if (displayBpm > 0) {
                 UI.updateBPMDisplay(displayBpm);
@@ -1105,7 +1112,7 @@ async function loop(timestamp) {
             if (result.isBeat && AppState.history.length > 0) {
                 AppState.history[AppState.history.length - 1].beat = true;
             }
-            AppState.addHistoryPoint(AppState.totalTime, filtered, result.threshold, false, displayBpm);
+            AppState.addHistoryPoint(AppState.totalTime, signal, result.threshold, false, displayBpm);
         }
     }
     
@@ -1173,6 +1180,12 @@ DOM.deleteOldestBtn.onclick = () => {
 DOM.settingPreview.onchange = saveSettings;
 DOM.settingAutoStop.oninput = saveSettings;
 DOM.settingAutoSave.onchange = saveSettings;
+DOM.settingUseFFT.onchange = () => {
+    Config.useFFT = DOM.settingUseFFT.checked;
+    Config.save();
+    BandpassFilter.reset();
+    FFTAnalyzer.reset();
+};
 DOM.settingBpmWindow.oninput = saveSettings;
 DOM.settingMaxRecords.oninput = saveSettings;
 
