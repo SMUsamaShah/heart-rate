@@ -963,7 +963,7 @@ function loadSettings() {
     DOM.settingPreview.checked = Config.showPreview;
     DOM.settingAutoStop.value = Config.autoStopSeconds;
     DOM.settingAutoSave.checked = Config.autoSave;
-    DOM.settingUseFFT.checked = Config.useFFT;
+    if (DOM.settingUseFFT) DOM.settingUseFFT.checked = Config.useFFT;
     DOM.settingBpmWindow.value = Config.bpmCalculationWindow;
     DOM.settingMaxRecords.value = Config.maxRecords;
     DOM.previewCanvas.classList.toggle('hidden', !Config.showPreview);
@@ -1180,12 +1180,14 @@ DOM.deleteOldestBtn.onclick = () => {
 DOM.settingPreview.onchange = saveSettings;
 DOM.settingAutoStop.oninput = saveSettings;
 DOM.settingAutoSave.onchange = saveSettings;
-DOM.settingUseFFT.onchange = () => {
-    Config.useFFT = DOM.settingUseFFT.checked;
-    Config.save();
-    BandpassFilter.reset();
-    FFTAnalyzer.reset();
-};
+if (DOM.settingUseFFT) {
+    DOM.settingUseFFT.onchange = () => {
+        Config.useFFT = DOM.settingUseFFT.checked;
+        Config.save();
+        BandpassFilter.reset();
+        FFTAnalyzer.reset();
+    };
+}
 DOM.settingBpmWindow.oninput = saveSettings;
 DOM.settingMaxRecords.oninput = saveSettings;
 
