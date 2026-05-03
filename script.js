@@ -114,7 +114,7 @@ const DOM = {
     reviewControls: document.getElementById('reviewControls'),
     reviewTimeDisplay: document.getElementById('reviewTimeDisplay'),
     historySlider: document.getElementById('historySlider'),
-    
+
     tabHistory: document.getElementById('tabHistory'),
     tabSettings: document.getElementById('tabSettings'),
     contentHistory: document.getElementById('contentHistory'),
@@ -126,31 +126,102 @@ const DOM = {
     exportImgBtn: document.getElementById('exportImgBtn'),
     exportJsonBtn: document.getElementById('exportJsonBtn'),
     deleteOldestBtn: document.getElementById('deleteOldestBtn'),
-    
+
     bpmSlider: document.getElementById('bpmSlider'),
     targetBpmValue: document.getElementById('targetBpmValue'),
     savedList: document.getElementById('savedList'),
-    
+
     settingPreview: document.getElementById('settingPreview'),
     settingAutoStop: document.getElementById('settingAutoStop'),
     settingAutoSave: document.getElementById('settingAutoSave'),
     settingUseFFT: document.getElementById('settingUseFFT'),
     settingBpmWindow: document.getElementById('settingBpmWindow'),
     settingMaxRecords: document.getElementById('settingMaxRecords'),
-    
+
     statRes: document.getElementById('statRes'),
     statFps: document.getElementById('statFps'),
     statExp: document.getElementById('statExp'),
     statIso: document.getElementById('statIso'),
-    
+
     storageInfo: document.getElementById('storageInfo'),
     storageBar: document.getElementById('storageBar'),
     recordCount: document.getElementById('recordCount'),
-    emptyState: document.getElementById('emptyState')
+    emptyState: document.getElementById('emptyState'),
+
+    // New UI elements
+    statusDot: document.getElementById('statusDot'),
+    statusText: document.getElementById('statusText'),
+    recordTimer: document.getElementById('recordTimer'),
+    timerDisplay: document.getElementById('timerDisplay'),
+    cameraFab: document.getElementById('cameraFab'),
+    navHome: document.getElementById('navHome'),
+    navSettings: document.getElementById('navSettings'),
+    avgBpmDisplay: document.getElementById('avgBpmDisplay'),
+    maxBpmDisplay: document.getElementById('maxBpmDisplay'),
+    minBpmDisplay: document.getElementById('minBpmDisplay'),
+    gaugeCanvas: document.getElementById('gaugeCanvas'),
+    gaugeEmoji: document.getElementById('gaugeEmoji'),
+    zoneName: document.getElementById('zoneName'),
+    zoneRange: document.getElementById('zoneRange'),
+    bpmBadge: document.getElementById('bpmBadge'),
+    windowSelect: document.getElementById('windowSelect')
 };
 
 const ppgCtx = DOM.ppgCanvas.getContext('2d', { alpha: false });
 const previewCtx = DOM.previewCanvas.getContext('2d', { willReadFrequently: true });
+const gaugeCtx = DOM.gaugeCanvas.getContext('2d');
+
+// ============================================================================
+// HEART RATE ZONES
+// ============================================================================
+const ZONES = [
+    { name: 'Resting',  range: '< 60 BPM',      min: 0,   max: 60,  badge: 'Low',       badgeClass: 'low',      colorA: '#3b82f6', colorB: '#06b6d4', emoji: '😴' },
+    { name: 'Fat Burn', range: '60–100 BPM',     min: 60,  max: 100, badge: 'Normal',    badgeClass: '',         colorA: '#f97316', colorB: '#f59e0b', emoji: '🔥' },
+    { name: 'Cardio',   range: '100–140 BPM',    min: 100, max: 140, badge: 'Elevated',  badgeClass: 'elevated', colorA: '#ef4444', colorB: '#f97316', emoji: '💪' },
+    { name: 'Peak',     range: '140–170 BPM',    min: 140, max: 170, badge: 'High',      badgeClass: 'high',     colorA: '#dc2626', colorB: '#ef4444', emoji: '⚡' },
+    { name: 'Maximum',  range: '170+ BPM',        min: 170, max: 300, badge: 'Very High', badgeClass: 'high',     colorA: '#991b1b', colorB: '#dc2626', emoji: '🚀' },
+];
+
+function getZone(bpm) {
+    if (!bpm || bpm <= 0) return null;
+    return ZONES.find(z => bpm >= z.min && bpm < z.max) || ZONES[ZONES.length - 1];
+}
+
+function drawGauge(bpm) {
+    const W = DOM.gaugeCanvas.width;
+    const H = DOM.gaugeCanvas.height;
+    const cx = W / 2;
+    const cy = H / 2;
+    const r = W * 0.37;
+    const lw = W * 0.13;
+    const DEG = Math.PI / 180;
+    const gapStart = 225 * DEG;
+    const gapEnd = 315 * DEG;
+
+    gaugeCtx.clearRect(0, 0, W, H);
+    gaugeCtx.lineWidth = lw;
+    gaugeCtx.lineCap = 'round';
+
+    // Background track
+    gaugeCtx.beginPath();
+    gaugeCtx.strokeStyle = '#1e2940';
+    gaugeCtx.arc(cx, cy, r, gapStart, gapEnd, true);
+    gaugeCtx.stroke();
+
+    const zone = getZone(bpm);
+    if (!zone) return;
+
+    const fill = Math.max(0.05, Math.min(1, (bpm - zone.min) / (zone.max - zone.min)));
+    const fillEnd = gapStart - fill * (270 * DEG);
+    const grad = gaugeCtx.createLinearGradient(0, H, W, 0);
+    grad.addColorStop(0, zone.colorA);
+    grad.addColorStop(1, zone.colorB);
+
+    gaugeCtx.beginPath();
+    gaugeCtx.strokeStyle = grad;
+    gaugeCtx.arc(cx, cy, r, gapStart, fillEnd, true);
+    gaugeCtx.stroke();
+}
 
 let animationFrameId;
 
@@ -166,19 +237,36 @@ const AppState = {
     history: [],
     reviewData: null,
     reviewOffset: 0,
-    
+    windowSeconds: 20,
+    minBpm: 0,
+    maxBpm: 0,
+    bpmSum: 0,
+    bpmCount: 0,
+
     addHistoryPoint(time, val, threshold, isBeat, bpm) {
         this.history.push({ time, val, threshold, beat: isBeat, bpm });
-        const cutoff = time - CONSTANTS.DISPLAY.HISTORY_SECONDS;
+        const cutoff = time - 60;
         while (this.history.length > 1 && this.history[0].time < cutoff) {
             this.history.shift();
         }
     },
-    
+
     clearHistory() {
         this.history = [];
         this.totalTime = 0;
         this.lastTime = null;
+        this.minBpm = 0;
+        this.maxBpm = 0;
+        this.bpmSum = 0;
+        this.bpmCount = 0;
+    },
+
+    updateBpmStats(bpm) {
+        if (!bpm || bpm <= 0) return;
+        if (this.minBpm === 0 || bpm < this.minBpm) this.minBpm = bpm;
+        if (bpm > this.maxBpm) this.maxBpm = bpm;
+        this.bpmSum += bpm;
+        this.bpmCount++;
     }
 };
 
@@ -637,18 +725,39 @@ const Renderer = {
         const cy = canvas.height / 2;
         const sy = canvas.height / 2.2;
         const color = mode === 'simulate' ? '#a855f7' : (mode === 'review' ? '#f59e0b' : '#ef4444');
-        const pps = canvas.width / CONSTANTS.DISPLAY.WINDOW_SECONDS;
+        const windowSec = AppState.windowSeconds || CONSTANTS.DISPLAY.WINDOW_SECONDS;
+        const pps = canvas.width / windowSec;
         const latestTime = data[end - 1].time;
-        const windowStart = latestTime - CONSTANTS.DISPLAY.WINDOW_SECONDS;
+        const windowStart = latestTime - windowSec;
+        const markerInterval = Math.max(1, Math.round(windowSec / 10));
 
-        ppgCtx.textAlign = "center";
-        ppgCtx.textBaseline = "bottom";
-        ppgCtx.font = "9px monospace";
+        // Y-axis BPM scale (right side)
+        ppgCtx.textAlign = 'right';
+        ppgCtx.textBaseline = 'middle';
+        ppgCtx.font = '9px system-ui';
+        ppgCtx.fillStyle = 'rgba(255,255,255,0.35)';
+        for (const bpm of [0, 30, 60, 90, 120]) {
+            const y = cy - (bpm - 60) / 100 * sy;
+            if (y >= 4 && y <= canvas.height - 4) {
+                ppgCtx.fillText(bpm, canvas.width - 3, y);
+                ppgCtx.beginPath();
+                ppgCtx.strokeStyle = 'rgba(255,255,255,0.06)';
+                ppgCtx.lineWidth = 1;
+                ppgCtx.setLineDash([]);
+                ppgCtx.moveTo(0, y);
+                ppgCtx.lineTo(canvas.width - 22, y);
+                ppgCtx.stroke();
+            }
+        }
 
-        // Time marker grid lines (computed from time, not from data indices)
-        ppgCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ppgCtx.textAlign = 'center';
+        ppgCtx.textBaseline = 'bottom';
+        ppgCtx.font = '9px system-ui';
+
+        // Vertical time grid lines
+        ppgCtx.strokeStyle = 'rgba(255,255,255,0.1)';
         ppgCtx.fillStyle = 'rgba(255,255,255,0.3)';
-        for (let s = Math.ceil(windowStart); s <= Math.floor(latestTime); s++) {
+        for (let s = Math.ceil(windowStart / markerInterval) * markerInterval; s <= Math.floor(latestTime); s += markerInterval) {
             const x = (s - windowStart) * pps;
             ppgCtx.beginPath();
             ppgCtx.moveTo(x, 0);
@@ -806,7 +915,8 @@ const UI = {
     
     updateBPMDisplay(bpm, colorClass) {
         DOM.bpmDisplay.innerText = bpm > 0 ? bpm : '--';
-        DOM.bpmDisplay.className = colorClass || '';
+        DOM.bpmDisplay.className = 'bpm-number' + (colorClass ? ' ' + colorClass : '');
+        UI.updateZoneUI(bpm);
     },
     
     updateStorageInfo() {
@@ -832,9 +942,49 @@ const UI = {
     },
     
     updateButtonsForMode(mode) {
-        DOM.simulateBtn.innerText = mode === 'simulate' ? 'Stop' : 'Simulate';
+        DOM.simulateBtn.innerText = mode === 'simulate' ? 'Stop' : 'Demo';
         const canSave = mode === 'idle' && AppState.history.length > 0;
         DOM.saveBtn.classList.toggle('hidden', !canSave);
+
+        const recording = mode === 'camera' || mode === 'simulate';
+        DOM.cameraFab.classList.toggle('recording', recording);
+        DOM.recordTimer.classList.toggle('hidden', !recording);
+        DOM.statusDot.classList.toggle('active', recording);
+        DOM.statusText.innerText = mode === 'camera' ? 'Camera monitoring' :
+            mode === 'simulate' ? 'Demo mode' : 'Ready';
+    },
+
+    updateZoneUI(bpm) {
+        const zone = getZone(bpm);
+        if (!zone || bpm <= 0) {
+            DOM.bpmBadge.classList.add('hidden');
+            DOM.zoneName.innerText = '--';
+            DOM.zoneRange.innerText = '';
+            DOM.gaugeEmoji.innerText = '💗';
+            drawGauge(0);
+            return;
+        }
+        DOM.bpmBadge.classList.remove('hidden');
+        DOM.bpmBadge.innerText = zone.badge;
+        DOM.bpmBadge.className = 'bpm-badge' + (zone.badgeClass ? ' ' + zone.badgeClass : '');
+        DOM.zoneName.innerText = zone.name;
+        DOM.zoneRange.innerText = zone.range;
+        DOM.gaugeEmoji.innerText = zone.emoji;
+        drawGauge(bpm);
+    },
+
+    updateStatsDisplay() {
+        const avg = AppState.bpmCount > 0 ? Math.round(AppState.bpmSum / AppState.bpmCount) : 0;
+        DOM.avgBpmDisplay.innerText = avg > 0 ? avg : '--';
+        DOM.maxBpmDisplay.innerText = AppState.maxBpm > 0 ? AppState.maxBpm : '--';
+        DOM.minBpmDisplay.innerText = AppState.minBpm > 0 ? AppState.minBpm : '--';
+    },
+
+    updateTimerDisplay() {
+        const t = Math.floor(AppState.totalTime);
+        const m = String(Math.floor(t / 60)).padStart(2, '0');
+        const s = String(t % 60).padStart(2, '0');
+        DOM.timerDisplay.innerText = `${m}:${s}`;
     }
 };
 
@@ -865,6 +1015,7 @@ async function setMode(newMode) {
         DOM.saturationWarning.classList.add('hidden');
         DOM.torchWarning.classList.add('hidden');
         UI.updateBPMDisplay(0);
+        UI.updateStatsDisplay();
         
     } else if (newMode === 'camera') {
         const started = await Camera.start();
@@ -1002,25 +1153,28 @@ function renderRecordingsList() {
     
     records.forEach(r => {
         const d = new Date(r.timestamp);
+        const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dateStr = d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
         const div = document.createElement('div');
         div.className = 'recording-item';
-        
+
         div.innerHTML = `
-            <div>
-                <div style="font-weight: bold; color: #38bdf8; font-size: 12px;">
-                    ${d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                </div>
-                <div style="font-size: 10px; color: #64748b;">
-                    ${d.toLocaleDateString()} • ${r.duration.toFixed(1)}s
-                </div>
+            <div class="recording-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3 12h2l2-7 4 14 3-9 2 2h5"/>
+                    <polyline points="3,12 5,12 7,5 11,19 14,10 16,12 21,12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
             </div>
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="text-align: right;">
-                    <div style="font-size: 9px; color: #64748b; text-transform: uppercase;">Avg BPM</div>
-                    <div style="font-weight: bold; color: #e2e8f0; font-size: 14px;">${r.avgBpm}</div>
-                </div>
-                <button class="delete-btn del" data-id="${r.id}">✕</button>
+            <div class="recording-info">
+                <div class="recording-time">${timeStr}</div>
+                <div class="recording-date">${dateStr} • ${r.duration.toFixed(1)}s</div>
             </div>
+            <div class="recording-bpm">
+                <div class="bpm-label-sm">AVG BPM</div>
+                <div class="bpm-val-sm">${r.avgBpm || '--'}</div>
+            </div>
+            <span class="recording-chevron">›</span>
+            <button class="delete-btn del" data-id="${r.id}">✕</button>
         `;
         
         div.onclick = (e) => {
@@ -1121,7 +1275,11 @@ async function loop(timestamp) {
             const displayBpm = fftBpm > 0 ? fftBpm : result.bpm;
             if (displayBpm > 0) {
                 UI.updateBPMDisplay(displayBpm);
+                AppState.updateBpmStats(displayBpm);
+                UI.updateStatsDisplay();
             }
+
+            UI.updateTimerDisplay();
 
             // Beat fires one sample after the peak (on the declining edge).
             // Retroactively mark the previous history entry so the dot sits on the peak.
@@ -1176,6 +1334,23 @@ DOM.bpmSlider.oninput = e => {
 };
 
 DOM.simulateBtn.onclick = () => setMode(AppState.mode === 'simulate' ? 'idle' : 'simulate');
+DOM.cameraFab.onclick = () => {
+    if (AppState.mode === 'idle') setMode('camera');
+    else if (AppState.mode === 'camera' || AppState.mode === 'simulate') setMode('idle');
+};
+DOM.navHome.onclick = () => {
+    DOM.navHome.classList.add('active');
+    DOM.navSettings.classList.remove('active');
+    UI.switchTab('history');
+};
+DOM.navSettings.onclick = () => {
+    DOM.navSettings.classList.add('active');
+    DOM.navHome.classList.remove('active');
+    UI.switchTab('settings');
+};
+DOM.windowSelect.onchange = e => {
+    AppState.windowSeconds = parseInt(e.target.value) || 20;
+};
 DOM.saveBtn.onclick = saveRecording;
 DOM.backToLiveBtn.onclick = () => setMode('idle');
 DOM.exportImgBtn.onclick = exportGraphImage;
@@ -1241,24 +1416,11 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 // ============================================================================
-// CANVAS TAP TO RECORD
+// CANVAS TAP — exits review mode only
 // ============================================================================
-function handleCanvasTap() {
-    const mode = AppState.mode;
-    if (mode === 'review') return;
-    if (mode === 'idle') {
-        setMode('camera');
-    } else if (mode === 'camera' || mode === 'simulate') {
-        setMode('idle');
-    }
-}
-
-document.getElementById('canvasContainer').addEventListener('touchstart', e => {
-    e.preventDefault();
-    handleCanvasTap();
-}, { passive: false });
-
-document.getElementById('canvasContainer').addEventListener('click', handleCanvasTap);
+document.getElementById('canvasContainer').addEventListener('click', () => {
+    if (AppState.mode === 'review') setMode('idle');
+});
 
 // ============================================================================
 // INITIALIZATION

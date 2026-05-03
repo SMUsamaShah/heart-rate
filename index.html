@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Pulse Monitor v2.7</title>
-    
-    <meta name="theme-color" content="#0f172a">
+    <title>Heart Rate Monitor</title>
+
+    <meta name="theme-color" content="#0a0e1a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Pulse">
@@ -13,596 +13,295 @@
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icon.svg">
     <link rel="manifest" href="manifest.json">
-
-    <style>
-        :root {
-            --bg-dark: #0f172a;
-            --bg-medium: #1e293b;
-            --bg-light: #334155;
-            --text-color: #e2e8f0;
-            --text-muted: #94a3b8;
-            --primary: #0ea5e9;
-            --success: #10b981;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-        }
-        
-        body {
-            margin: 0;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            background: var(--bg-dark);
-            color: var(--text-color);
-            font-family: system-ui, -apple-system, sans-serif;
-            overflow: hidden;
-            touch-action: none;
-            user-select: none;
-        }
-        
-        header {
-            padding: 8px 16px;
-            background: rgba(15, 23, 42, 0.8);
-            border-bottom: 1px solid #334155;
-            backdrop-filter: blur(12px);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        #canvasContainer {
-            flex: 1;
-            position: relative;
-            background: black;
-        }
-        
-        canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-        }
-        
-        .canvas-preview {
-            width: 32px;
-            height: 32px;
-            border: 1px solid #475569;
-            background: black;
-            image-rendering: pixelated;
-        }
-        
-        video {
-            display: none;
-        }
-        
-        .tabs {
-            display: flex;
-            border-bottom: 1px solid #334155;
-            background: rgba(30, 41, 59, 0.5);
-        }
-        
-        .tab {
-            flex: 1;
-            padding: 12px;
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-        }
-        
-        .tab.active {
-            background: var(--bg-light);
-            color: var(--primary);
-            border-bottom: 2px solid var(--primary);
-        }
-        
-        .tab-content {
-            display: none;
-            padding: 16px;
-            overflow-y: auto;
-            height: calc(45vh - 48px);
-            min-height: 212px;
-        }
-        
-        .tab-content:not(.hidden) {
-            display: block;
-        }
-        
-        .storage-bar {
-            height: 100%;
-            background: #0ea5e9;
-            transition: width 0.3s;
-        }
-        
-        .storage-bar.warning {
-            background: #f59e0b;
-        }
-        
-        .storage-bar.critical {
-            background: #ef4444;
-        }
-        
-        .controls {
-            height: 45vh;
-            min-height: 260px;
-            background: rgba(15, 23, 42, 0.92);
-            border-top: 1px solid #334155;
-            backdrop-filter: blur(12px);
-            display: flex;
-            flex-direction: column;
-            padding-bottom: env(safe-area-inset-bottom);
-        }
-        
-        .btn-group {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        
-        button {
-            padding: 12px;
-            font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        
-        #simulateBtn { background: #a855f7; color: white; }
-
-        #saveBtn {
-            position: absolute;
-            bottom: 16px;
-            right: 16px;
-            padding: 12px 24px;
-            background: #10b981;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-            z-index: 10;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-        }
-        
-        input[type="range"] {
-            width: 100%;
-            margin: 8px 0;
-        }
-        
-        input[type="range"].scrubber {
-            appearance: none;
-            background: transparent;
-            height: 20px;
-        }
-        
-        input[type="range"].scrubber::-webkit-slider-runnable-track {
-            height: 6px;
-            background: #334155;
-            border-radius: 3px;
-        }
-        
-        input[type="range"].scrubber::-webkit-slider-thumb {
-            appearance: none;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: #38bdf8;
-            margin-top: -6px;
-            cursor: pointer;
-        }
-        
-        .recordings {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        
-        .recording-item {
-            padding: 12px;
-            background: var(--bg-medium);
-            border: 1px solid var(--bg-light);
-            border-radius: 4px;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .recording-item:hover {
-            background: var(--bg-light);
-        }
-        
-        .delete-btn {
-            padding: 4px 8px;
-            background: none;
-            color: #64748b;
-            border: none;
-            cursor: pointer;
-            font-size: 18px;
-        }
-        
-        .delete-btn:hover {
-            color: var(--danger);
-        }
-        
-        .overlay {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(0, 0, 0, 0.6);
-            pointer-events: none;
-        }
-        
-        .review-controls {
-            display: none;
-            position: absolute;
-            bottom: 16px;
-            left: 16px;
-            right: 16px;
-            padding: 16px;
-            background: rgba(30, 41, 59, 0.95);
-            border: 1px solid #475569;
-            border-radius: 8px;
-            backdrop-filter: blur(12px);
-        }
-        
-        .review-controls.active {
-            display: block;
-        }
-        
-        .hidden { display: none; }
-        
-        .warning {
-            position: absolute;
-            top: 16px;
-            left: 0;
-            right: 0;
-            text-align: center;
-            pointer-events: none;
-        }
-        
-        .warning span {
-            display: inline-block;
-            padding: 4px 12px;
-            background: rgba(127, 29, 29, 0.9);
-            color: white;
-            font-size: 10px;
-            font-weight: bold;
-            border: 1px solid var(--danger);
-            border-radius: 12px;
-        }
-        
-        .scroller::-webkit-scrollbar {
-            width: 4px;
-        }
-        
-        .scroller::-webkit-scrollbar-track {
-            background: rgba(30, 41, 59, 0.3);
-        }
-        
-        .scroller::-webkit-scrollbar-thumb {
-            background: #475569;
-            border-radius: 2px;
-        }
-        
-        .toggle-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
-        }
-        
-        .setting-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
-        }
-        
-        .setting-row input[type="number"] {
-            width: 64px;
-            padding: 4px;
-            background: var(--bg-dark);
-            border: 1px solid var(--bg-light);
-            border-radius: 4px;
-            color: var(--text-color);
-            text-align: center;
-        }
-        
-        small {
-            display: block;
-            font-size: 10px;
-            color: #64748b;
-        }
-        
-        .camera-stats {
-            border-top: 1px solid var(--bg-light);
-            padding-top: 12px;
-            margin-top: 12px;
-        }
-        
-        .camera-stats h4 {
-            font-size: 10px;
-            font-weight: bold;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 8px;
-        }
-        
-        .camera-stats > div {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            font-family: monospace;
-            font-size: 10px;
-            color: var(--text-muted);
-        }
-        
-        .camera-stats > div > div {
-            background: var(--bg-dark);
-            padding: 6px;
-            border-radius: 4px;
-        }
-        
-        .camera-stats span {
-            color: var(--text-color);
-        }
-        
-        .version {
-            text-align: center;
-            padding-top: 12px;
-            font-family: monospace;
-            font-size: 10px;
-            color: #475569;
-        }
-        
-        
-        .toggle-checkbox {
-            position: relative;
-            width: 40px;
-            height: 20px;
-            appearance: none;
-            background: #475569;
-            border-radius: 10px;
-            cursor: pointer;
-        }
-        
-        .toggle-checkbox:checked {
-            background: var(--primary);
-        }
-        
-        .toggle-checkbox::before {
-            content: '';
-            position: absolute;
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background: white;
-            top: 2px;
-            left: 2px;
-            transition: left 0.2s;
-        }
-        
-        .toggle-checkbox:checked::before {
-            left: 22px;
-        }
-
-        #installBanner {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: rgba(15, 23, 42, 0.97);
-            border-top: 1px solid #0ea5e9;
-            padding: 10px 14px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            z-index: 100;
-        }
-
-        #installBanner.hidden { display: none; }
-
-        #installBanner .install-text {
-            flex: 1;
-            min-width: 0;
-        }
-
-        #installBanner .install-text strong {
-            display: block;
-            font-size: 13px;
-            color: var(--text-color);
-        }
-
-        #installBanner .install-text small {
-            font-size: 11px;
-            color: var(--text-muted);
-            display: block;
-        }
-
-        #installBtn {
-            background: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            padding: 8px 14px;
-            font-size: 13px;
-            font-weight: bold;
-            cursor: pointer;
-            flex-shrink: 0;
-        }
-
-        #installDismissBtn {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            font-size: 22px;
-            cursor: pointer;
-            padding: 0 4px;
-            flex-shrink: 0;
-            line-height: 1;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <header>
+    <!-- ====================================================
+         HEADER
+         ==================================================== -->
+    <header class="app-header">
         <div>
-            <small>HEART RATE</small>
-            <div>
-                <span id="bpmDisplay" style="font-size: 2em; font-family: monospace;">--</span>
-                <span id="modeBadge" class="hidden"></span>
+            <h1 class="app-title">Heart Rate</h1>
+            <div class="app-status">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Ready</span>
             </div>
         </div>
-        <canvas id="previewCanvas" width="30" height="30" class="canvas-preview hidden"></canvas>
+        <div id="recordTimer" class="record-timer hidden">
+            <div class="rec-dot"></div>
+            <span id="timerDisplay">00:00</span>
+        </div>
     </header>
 
-    <div id="canvasContainer">
-        <canvas id="ppgCanvas"></canvas>
-        <video id="videoElement" playsinline></video>
-        
-        <div id="instructionOverlay" class="overlay">
-            <div>
-                <p><strong>Ready to Measure</strong></p>
-                <p>Tap screen to start recording.</p>
-                <p><small>Cover the back camera &amp; flash gently with your fingertip.</small></p>
+    <!-- ====================================================
+         MAIN SCROLLABLE CONTENT
+         ==================================================== -->
+    <main class="main-scroll">
+
+        <!-- Live BPM Card -->
+        <div class="card bpm-card">
+            <div class="bpm-main">
+                <div class="section-label">LIVE HEART RATE</div>
+                <div class="bpm-row">
+                    <span id="bpmDisplay" class="bpm-number">--</span>
+                    <div class="bpm-meta">
+                        <span class="heart-icon">♥</span>
+                        <span class="bpm-unit">BPM</span>
+                    </div>
+                </div>
+                <div id="bpmBadge" class="bpm-badge hidden">Normal</div>
+            </div>
+            <div class="zone-section">
+                <div class="zone-label-sm">ZONE</div>
+                <div id="zoneName" class="zone-name">--</div>
+                <div id="zoneRange" class="zone-range"></div>
+            </div>
+            <div class="gauge-wrap">
+                <canvas id="gaugeCanvas" width="80" height="80"></canvas>
+                <div class="gauge-emoji" id="gaugeEmoji">💗</div>
             </div>
         </div>
 
-        <div id="saturationWarning" class="warning hidden">
-            <span>⚠️ SIGNAL CLIPPING - Move finger slightly</span>
-        </div>
-        
-        <div id="torchWarning" class="warning hidden" style="top: 48px;">
-            <span>⚠️ Camera flash unavailable - Ensure good lighting</span>
-        </div>
-
-        <button id="saveBtn" class="hidden">Save</button>
-
-        <div id="installBanner" class="hidden">
-            <div class="install-text">
-                <strong>Install Pulse Monitor</strong>
-                <small id="installHint">Add to home screen for quick access</small>
+        <!-- Waveform Card -->
+        <div class="card waveform-card">
+            <div class="waveform-header">
+                <div class="window-select-wrap">
+                    <select id="windowSelect" class="window-select">
+                        <option value="10">10s</option>
+                        <option value="20" selected>20s</option>
+                        <option value="30">30s</option>
+                    </select>
+                </div>
+                <div class="waveform-header-right">
+                    <canvas id="previewCanvas" width="30" height="30" class="canvas-preview hidden"></canvas>
+                    <button id="expandBtn" class="expand-btn" aria-label="Expand">↗</button>
+                </div>
             </div>
-            <button id="installBtn">Install</button>
-            <button id="installDismissBtn" aria-label="Dismiss">&#x2715;</button>
+            <div id="canvasContainer">
+                <canvas id="ppgCanvas"></canvas>
+                <video id="videoElement" playsinline></video>
+
+                <div id="instructionOverlay" class="overlay">
+                    <div>
+                        <p><strong>Ready to Measure</strong></p>
+                        <p>Tap the camera button below to start.</p>
+                        <p><small>Cover the back camera &amp; flash gently with your fingertip.</small></p>
+                    </div>
+                </div>
+
+                <div id="saturationWarning" class="warning hidden">
+                    <span>⚠️ SIGNAL CLIPPING — Move finger slightly</span>
+                </div>
+                <div id="torchWarning" class="warning hidden" style="top:38px">
+                    <span>⚠️ Flash unavailable — Ensure good lighting</span>
+                </div>
+            </div>
         </div>
 
-        <div id="reviewControls" class="review-controls">
-            <div>
+        <!-- Stats Row -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-icon avg">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="#ef4444">
+                        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="stat-label">AVERAGE</div>
+                    <div class="stat-val"><span id="avgBpmDisplay">--</span> <small>BPM</small></div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon max">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="#ef4444">
+                        <path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3z"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="stat-label">MAX</div>
+                    <div class="stat-val"><span id="maxBpmDisplay">--</span> <small>BPM</small></div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon min">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="#3b82f6">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 14H11v-4H9l3-3 3 3h-2v4z"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="stat-label">MIN</div>
+                    <div class="stat-val"><span id="minBpmDisplay">--</span> <small>BPM</small></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabs Card -->
+        <div class="card tabs-card">
+            <div class="tab-bar">
+                <button id="tabHistory" class="tab active">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/>
+                    </svg>
+                    History
+                </button>
+                <button id="tabSettings" class="tab">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z"/>
+                    </svg>
+                    Insights
+                </button>
+            </div>
+
+            <!-- History Tab -->
+            <div id="contentHistory" class="tab-content">
+                <div class="recordings-header">
+                    <span class="recordings-title">Recent Recordings</span>
+                    <button id="exportJsonBtn" class="see-all-btn">Export All ›</button>
+                </div>
+
+                <!-- IDs required by script.js (hidden) -->
+                <div style="display:none">
+                    <span id="storageInfo"></span>
+                    <div style="width:100%;height:6px;background:#334155;border-radius:3px;overflow:hidden">
+                        <div id="storageBar" class="storage-bar" style="width:0%"></div>
+                    </div>
+                    <span id="recordCount"></span>
+                    <button id="deleteOldestBtn"></button>
+                </div>
+
+                <div id="savedList" class="recordings"></div>
+                <div id="emptyState" class="empty-state hidden">
+                    <div>No recordings yet</div>
+                    <small>Tap the camera button to start recording</small>
+                </div>
+            </div>
+
+            <!-- Settings / Insights Tab -->
+            <div id="contentSettings" class="tab-content hidden">
+
+                <div class="toggle-row">
+                    <div class="setting-label">Camera Preview</div>
+                    <input type="checkbox" id="settingPreview" class="toggle-checkbox">
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Auto-Stop (seconds)</div>
+                        <span class="setting-sublabel">0 = Manual stop</span>
+                    </div>
+                    <input type="number" id="settingAutoStop" min="0" max="300" value="30">
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">BPM Averaging (Beats)</div>
+                        <span class="setting-sublabel">Number of beats to average</span>
+                    </div>
+                    <input type="number" id="settingBpmWindow" min="2" max="50" value="4">
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Max Recordings</div>
+                        <span class="setting-sublabel">0 = No limit</span>
+                    </div>
+                    <input type="number" id="settingMaxRecords" min="0" max="1000" value="20">
+                </div>
+
+                <div class="toggle-row">
+                    <div class="setting-label">Auto-Save on Stop</div>
+                    <input type="checkbox" id="settingAutoSave" class="toggle-checkbox">
+                </div>
+
+                <div class="toggle-row">
+                    <div class="setting-label">FFT Beat Detection</div>
+                    <input type="checkbox" id="settingUseFFT" class="toggle-checkbox">
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Demo Mode</div>
+                        <span class="setting-sublabel">Generate synthetic signal</span>
+                    </div>
+                    <button id="simulateBtn" class="simulate-btn">Demo</button>
+                </div>
+
+                <div id="simControls">
+                    <label style="font-size:13px;color:var(--text-muted)">Target BPM: <span id="targetBpmValue">75</span></label>
+                    <input type="range" id="bpmSlider" min="40" max="220" value="75">
+                </div>
+
+                <div class="setting-section-label">Camera Specs</div>
+                <div class="camera-stats-grid">
+                    <div class="camera-stat-item">Res: <span id="statRes">--</span></div>
+                    <div class="camera-stat-item">FPS: <span id="statFps">--</span></div>
+                    <div class="camera-stat-item">Exp: <span id="statExp">--</span></div>
+                    <div class="camera-stat-item">ISO: <span id="statIso">--</span></div>
+                </div>
+
+                <div class="version-text">Pulse Monitor v2.7</div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ====================================================
+         BOTTOM NAVIGATION
+         ==================================================== -->
+    <nav class="bottom-nav">
+        <button class="nav-item active" id="navHome">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+            </svg>
+            <span>Home</span>
+        </button>
+        <div class="nav-fab-wrap">
+            <button class="nav-fab" id="cameraFab" aria-label="Start recording">
+                <svg viewBox="0 0 24 24" fill="white">
+                    <path d="M9.4 2 8 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-4l-1.4-2H9.4ZM12 17a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"/>
+                </svg>
+            </button>
+        </div>
+        <button class="nav-item" id="navSettings">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.49.49 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+            </svg>
+            <span>Settings</span>
+        </button>
+    </nav>
+
+    <!-- ====================================================
+         REVIEW OVERLAY
+         ==================================================== -->
+    <div id="reviewControls">
+        <div class="review-panel">
+            <div class="review-header">
                 <span>Timeline</span>
                 <span id="reviewTimeDisplay">Live</span>
             </div>
             <input type="range" id="historySlider" min="0" max="100" value="100" class="scrubber">
-            <div class="btn-group">
-                <button id="exportImgBtn">Save Graph Img</button>
+            <div class="review-actions">
+                <button id="exportImgBtn">Save Graph Image</button>
                 <button id="backToLiveBtn">Done</button>
             </div>
         </div>
     </div>
 
-    <div class="controls">
-        <div class="tabs">
-            <button id="tabHistory" class="tab active">History</button>
-            <button id="tabSettings" class="tab">Settings</button>
+    <!-- ====================================================
+         MISC (required IDs)
+         ==================================================== -->
+    <span id="modeBadge" class="hidden"></span>
+    <button id="saveBtn" class="hidden">Save Recording</button>
+
+    <div id="installBanner" class="hidden">
+        <div class="install-text">
+            <strong>Install Pulse Monitor</strong>
+            <small id="installHint">Add to home screen for quick access</small>
         </div>
-
-        <div id="contentHistory" class="tab-content scroller">
-            <div style="padding: 12px; border-bottom: 1px solid #334155; background: rgba(30, 41, 59, 0.3); margin: -16px -16px 16px -16px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <span style="font-size: 10px; font-weight: bold; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">Storage</span>
-                    <span id="storageInfo" style="font-size: 10px; font-family: monospace; color: #64748b;">--</span>
-                </div>
-                <div style="width: 100%; background: #334155; border-radius: 9999px; height: 8px; overflow: hidden;">
-                    <div id="storageBar" class="storage-bar" style="width: 0%"></div>
-                </div>
-            </div>
-
-            <div style="padding: 8px 12px; background: rgba(30, 41, 59, 0.5); font-size: 10px; font-weight: bold; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items: center; margin: -16px -16px 12px -16px;">
-                <span id="recordCount">0 Recordings</span>
-                <div style="display: flex; gap: 8px;">
-                    <button id="deleteOldestBtn" style="color: #f87171; padding: 4px; background: none; border: none; cursor: pointer; font-size: 10px;">Del Oldest</button>
-                    <button id="exportJsonBtn" style="color: #38bdf8; padding: 4px; background: none; border: none; cursor: pointer; font-size: 10px;">Export All ⬇</button>
-                </div>
-            </div>
-
-            <div id="savedList" class="recordings"></div>
-            <div id="emptyState" class="hidden" style="text-align: center; color: #475569; padding: 48px 0;">
-                <div style="margin-bottom: 8px;">No recordings yet</div>
-                <div style="font-size: 12px; color: #334155;">Tap the screen above to start recording</div>
-            </div>
-        </div>
-
-        <div id="contentSettings" class="tab-content scroller">
-            <div class="toggle-row">
-                <label>Camera Preview</label>
-                <input type="checkbox" id="settingPreview" class="toggle-checkbox">
-            </div>
-            
-            <div class="setting-row">
-                <label>
-                    Auto-Stop (seconds)
-                    <small>0 = Manual stop</small>
-                </label>
-                <input type="number" id="settingAutoStop" min="0" max="300" value="30">
-            </div>
-            
-            <div class="setting-row">
-                <label>
-                    BPM Averaging (Beats)
-                    <small>How many beats to average</small>
-                </label>
-                <input type="number" id="settingBpmWindow" min="2" max="50" value="4">
-            </div>
-            
-            <div class="setting-row">
-                <label>
-                    Max Recordings
-                    <small>0 = No limit (until full)</small>
-                </label>
-                <input type="number" id="settingMaxRecords" min="0" max="1000" value="20">
-            </div>
-            
-            <div class="toggle-row">
-                <label>Auto-Save on Stop</label>
-                <input type="checkbox" id="settingAutoSave" class="toggle-checkbox">
-            </div>
-
-            <div class="toggle-row">
-                <label>FFT Beat Detection</label>
-                <input type="checkbox" id="settingUseFFT" class="toggle-checkbox">
-            </div>
-            
-            <div class="setting-row">
-                <label>
-                    Simulate Mode
-                    <small>Generate synthetic heart rate signal</small>
-                </label>
-                <button id="simulateBtn">Simulate</button>
-            </div>
-
-            <div id="simControls">
-                <label>Target BPM: <span id="targetBpmValue">75</span></label>
-                <input type="range" id="bpmSlider" min="40" max="220" value="75">
-            </div>
-
-            <div class="camera-stats">
-                <h4>Camera Specs</h4>
-                <div id="cameraStats">
-                    <div>Res: <span id="statRes">--</span></div>
-                    <div>FPS: <span id="statFps">--</span></div>
-                    <div>Exp: <span id="statExp">--</span></div>
-                    <div>ISO: <span id="statIso">--</span></div>
-                </div>
-            </div>
-            
-            <div class="version">Pulse Monitor v2.7</div>
-        </div>
+        <button id="installBtn">Install</button>
+        <button id="installDismissBtn" aria-label="Dismiss">&#x2715;</button>
     </div>
-
 
 <script src="script.js" defer></script>
 </body>
