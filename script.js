@@ -516,7 +516,13 @@ const BeatDetector = {
         this.bpm = 0;
         this.prevSignal = 0;
     },
-    
+
+    isPeak(prev, curr, threshold, runningMax) {
+        return prev > threshold &&
+               curr < prev &&
+               runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE;
+    },
+
     process(signal, timestamp, bpmWindow) {
         this.runningMax *= CONSTANTS.BEAT_DETECTION.DECAY_RATE;
         this.threshold = Math.max(
@@ -531,10 +537,8 @@ const BeatDetector = {
         // Fire when the previous sample was above threshold and signal is now declining.
         // Using prevSignal > threshold (not current signal) handles narrow peaks where
         // the only above-threshold sample is immediately followed by a drop below threshold.
-        if (this.prevSignal > this.threshold &&
-            signal < this.prevSignal &&
-            (timestamp - this.lastBeatTime) > this.refractoryPeriod &&
-            this.runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE) {
+        if (BeatDetector.isPeak(this.prevSignal, signal, this.threshold, this.runningMax) &&
+            (timestamp - this.lastBeatTime) > this.refractoryPeriod) {
 
             this.lastBeatTime = timestamp;
             isBeat = true;
@@ -600,10 +604,8 @@ const BeatDetector = {
 
             // Same logic as process(): fire when previous sample was above threshold
             // and signal is now declining. Handles narrow single-sample peaks.
-            if (prevVal > prevThreshold &&
-                val < prevVal &&
-                (i - lastBeatIndex) > CONSTANTS.BEAT_DETECTION.MIN_GAP_SAMPLES &&
-                runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE) {
+            if (BeatDetector.isPeak(prevVal, val, prevThreshold, runningMax) &&
+                (i - lastBeatIndex) > CONSTANTS.BEAT_DETECTION.MIN_GAP_SAMPLES) {
                 beatIndices.push(i - 1); // mark at the peak sample
                 lastBeatIndex = i - 1;
             }
@@ -1193,6 +1195,8 @@ DOM.deleteOldestBtn.onclick = () => {
 DOM.settingPreview.onchange = saveSettings;
 DOM.settingAutoStop.oninput = saveSettings;
 DOM.settingAutoSave.onchange = saveSettings;
+// Separate from saveSettings because toggling FFT must also flush filter
+// state immediately so stale samples don't bleed into the new mode.
 if (DOM.settingUseFFT) {
     DOM.settingUseFFT.onchange = () => {
         Config.useFFT = DOM.settingUseFFT.checked;
@@ -1239,26 +1243,22 @@ resizeCanvas();
 // ============================================================================
 // CANVAS TAP TO RECORD
 // ============================================================================
-document.getElementById('canvasContainer').addEventListener('touchstart', e => {
+function handleCanvasTap() {
     const mode = AppState.mode;
     if (mode === 'review') return;
-    e.preventDefault();
     if (mode === 'idle') {
         setMode('camera');
     } else if (mode === 'camera' || mode === 'simulate') {
         setMode('idle');
     }
+}
+
+document.getElementById('canvasContainer').addEventListener('touchstart', e => {
+    e.preventDefault();
+    handleCanvasTap();
 }, { passive: false });
 
-document.getElementById('canvasContainer').addEventListener('click', e => {
-    const mode = AppState.mode;
-    if (mode === 'review') return;
-    if (mode === 'idle') {
-        setMode('camera');
-    } else if (mode === 'camera' || mode === 'simulate') {
-        setMode('idle');
-    }
-});
+document.getElementById('canvasContainer').addEventListener('click', handleCanvasTap);
 
 // ============================================================================
 // INITIALIZATION
