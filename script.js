@@ -51,6 +51,22 @@ const CONSTANTS = {
     
     CAMERA: {
         PREVIEW_SIZE: 30
+    },
+
+    FILTER: {
+        HP_CUTOFF_HZ: 0.5,
+        LP_CUTOFF_HZ: 4.0
+    },
+
+    FFT: {
+        BUFFER_SIZE: 256,
+        MIN_BPM: 30,
+        MAX_BPM: 240
+    },
+
+    DISPLAY: {
+        WINDOW_SECONDS: 10,
+        HISTORY_SECONDS: 20
     }
 };
 
@@ -58,6 +74,7 @@ const Config = {
     showPreview: true,
     autoStopSeconds: 0,
     autoSave: true,
+    useFFT: false,
     bpmCalculationWindow: CONSTANTS.BPM.DEFAULT_WINDOW,
     maxRecords: 50,
     
@@ -78,6 +95,7 @@ const Config = {
             autoStopSeconds: this.autoStopSeconds,
             bpmCalculationWindow: this.bpmCalculationWindow,
             autoSave: this.autoSave,
+            useFFT: this.useFFT,
             maxRecords: this.maxRecords
         };
         localStorage.setItem(CONSTANTS.STORAGE.SETTINGS_KEY, JSON.stringify(data));
@@ -116,6 +134,7 @@ const DOM = {
     settingPreview: document.getElementById('settingPreview'),
     settingAutoStop: document.getElementById('settingAutoStop'),
     settingAutoSave: document.getElementById('settingAutoSave'),
+    settingUseFFT: document.getElementById('settingUseFFT'),
     settingBpmWindow: document.getElementById('settingBpmWindow'),
     settingMaxRecords: document.getElementById('settingMaxRecords'),
     
@@ -150,7 +169,8 @@ const AppState = {
     
     addHistoryPoint(time, val, threshold, isBeat, bpm) {
         this.history.push({ time, val, threshold, beat: isBeat, bpm });
-        if (this.history.length > DOM.ppgCanvas.width * 2) {
+        const cutoff = time - CONSTANTS.DISPLAY.HISTORY_SECONDS;
+        while (this.history.length > 1 && this.history[0].time < cutoff) {
             this.history.shift();
         }
     },
@@ -174,8 +194,9 @@ const Camera = {
             this.stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: 'environment',
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 }
+                    width: { ideal: 320 },
+                    height: { ideal: 240 },
+                    frameRate: { ideal: 60, min: 30 }
                 }
             });
             
@@ -213,8 +234,13 @@ const Camera = {
     
     stop() {
         if (this.stream) {
+            if (this.torchSupported) {
+                const track = this.stream.getVideoTracks()[0];
+                if (track) track.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {});
+            }
             this.stream.getTracks().forEach(t => t.stop());
             this.stream = null;
+            this.torchSupported = false;
         }
         DOM.video.srcObject = null;
     }
@@ -328,6 +354,148 @@ const SignalProcessor = {
 };
 
 // ============================================================================
+// BANDPASS FILTER
+// ============================================================================
+const BandpassFilter = {
+    hp_prev_x: 0,
+    hp_prev_y: 0,
+    lp_prev_y: 0,
+
+    reset() {
+        this.hp_prev_x = 0;
+        this.hp_prev_y = 0;
+        this.lp_prev_y = 0;
+    },
+
+    process(x, dt) {
+        const dt_s = Math.max(0.001, Math.min(dt, 0.1));
+
+        // First-order high-pass: removes DC drift and baseline wander
+        const hp_rc = 1 / (2 * Math.PI * CONSTANTS.FILTER.HP_CUTOFF_HZ);
+        const hp_alpha = hp_rc / (hp_rc + dt_s);
+        const hp_y = hp_alpha * (this.hp_prev_y + x - this.hp_prev_x);
+        this.hp_prev_x = x;
+        this.hp_prev_y = hp_y;
+
+        // First-order low-pass: removes motion noise and high-frequency artifacts
+        const lp_rc = 1 / (2 * Math.PI * CONSTANTS.FILTER.LP_CUTOFF_HZ);
+        const lp_alpha = dt_s / (lp_rc + dt_s);
+        const lp_y = lp_alpha * hp_y + (1 - lp_alpha) * this.lp_prev_y;
+        this.lp_prev_y = lp_y;
+
+        return lp_y;
+    }
+};
+
+// ============================================================================
+// FFT + FFT ANALYZER
+// ============================================================================
+
+// Radix-2 Cooley-Tukey FFT. Applies a Hann window then returns the first N/2
+// magnitude bins. N must be a power of two.
+function fftMagnitude(signal) {
+    const N = signal.length;
+    const real = new Float32Array(N);
+    const imag = new Float32Array(N);
+
+    // Copy with Hann window applied
+    for (let i = 0; i < N; i++) {
+        const w = 0.5 * (1 - Math.cos(2 * Math.PI * i / (N - 1)));
+        real[i] = signal[i] * w;
+    }
+
+    // Bit-reversal permutation
+    for (let i = 1, j = 0; i < N; i++) {
+        let bit = N >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+            [real[i], real[j]] = [real[j], real[i]];
+        }
+    }
+
+    // Butterfly passes
+    for (let len = 2; len <= N; len <<= 1) {
+        const ang = -2 * Math.PI / len;
+        const cosA = Math.cos(ang);
+        const sinA = Math.sin(ang);
+        for (let i = 0; i < N; i += len) {
+            let wR = 1, wI = 0;
+            for (let j = 0; j < (len >> 1); j++) {
+                const uR = real[i + j], uI = imag[i + j];
+                const xR = real[i + j + (len >> 1)], xI = imag[i + j + (len >> 1)];
+                const vR = wR * xR - wI * xI;
+                const vI = wR * xI + wI * xR;
+                real[i + j]              = uR + vR;
+                imag[i + j]              = uI + vI;
+                real[i + j + (len >> 1)] = uR - vR;
+                imag[i + j + (len >> 1)] = uI - vI;
+                const newWR = wR * cosA - wI * sinA;
+                wI = wR * sinA + wI * cosA;
+                wR = newWR;
+            }
+        }
+    }
+
+    // Magnitudes for positive frequencies only
+    const mags = new Float32Array(N >> 1);
+    for (let i = 0; i < (N >> 1); i++) {
+        mags[i] = Math.sqrt(real[i] * real[i] + imag[i] * imag[i]);
+    }
+    return mags;
+}
+
+const FFTAnalyzer = {
+    buffer: [],
+    timestamps: [],
+
+    reset() {
+        this.buffer = [];
+        this.timestamps = [];
+    },
+
+    addSample(val, timestampMs) {
+        this.buffer.push(val);
+        this.timestamps.push(timestampMs);
+        if (this.buffer.length > CONSTANTS.FFT.BUFFER_SIZE) {
+            this.buffer.shift();
+            this.timestamps.shift();
+        }
+    },
+
+    computeBPM() {
+        const N = CONSTANTS.FFT.BUFFER_SIZE;
+        if (this.buffer.length < N) return 0;
+
+        // Compute actual sample rate from timestamp span
+        const spanMs = this.timestamps[N - 1] - this.timestamps[0];
+        if (spanMs <= 0) return 0;
+        const sampleRate = (N - 1) / (spanMs / 1000);
+
+        const mags = fftMagnitude(this.buffer);
+
+        const minBin = Math.ceil(CONSTANTS.FFT.MIN_BPM / 60 * N / sampleRate);
+        const maxBin = Math.min(Math.floor(CONSTANTS.FFT.MAX_BPM / 60 * N / sampleRate), (N >> 1) - 1);
+
+        let peakBin = minBin, peakMag = 0;
+        for (let i = minBin; i <= maxBin; i++) {
+            if (mags[i] > peakMag) { peakMag = mags[i]; peakBin = i; }
+        }
+
+        // Parabolic interpolation for sub-bin frequency accuracy
+        let trueBin = peakBin;
+        if (peakBin > minBin && peakBin < maxBin) {
+            const denom = 2 * mags[peakBin] - mags[peakBin - 1] - mags[peakBin + 1];
+            if (denom > 0) {
+                trueBin = peakBin + 0.5 * (mags[peakBin + 1] - mags[peakBin - 1]) / denom;
+            }
+        }
+
+        return Math.round(trueBin * sampleRate / N * 60);
+    }
+};
+
+// ============================================================================
 // BEAT DETECTION
 // ============================================================================
 const BeatDetector = {
@@ -348,7 +516,13 @@ const BeatDetector = {
         this.bpm = 0;
         this.prevSignal = 0;
     },
-    
+
+    isPeak(prev, curr, threshold, runningMax) {
+        return prev > threshold &&
+               curr < prev &&
+               runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE;
+    },
+
     process(signal, timestamp, bpmWindow) {
         this.runningMax *= CONSTANTS.BEAT_DETECTION.DECAY_RATE;
         this.threshold = Math.max(
@@ -363,10 +537,8 @@ const BeatDetector = {
         // Fire when the previous sample was above threshold and signal is now declining.
         // Using prevSignal > threshold (not current signal) handles narrow peaks where
         // the only above-threshold sample is immediately followed by a drop below threshold.
-        if (this.prevSignal > this.threshold &&
-            signal < this.prevSignal &&
-            (timestamp - this.lastBeatTime) > this.refractoryPeriod &&
-            this.runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE) {
+        if (BeatDetector.isPeak(this.prevSignal, signal, this.threshold, this.runningMax) &&
+            (timestamp - this.lastBeatTime) > this.refractoryPeriod) {
 
             this.lastBeatTime = timestamp;
             isBeat = true;
@@ -432,10 +604,8 @@ const BeatDetector = {
 
             // Same logic as process(): fire when previous sample was above threshold
             // and signal is now declining. Handles narrow single-sample peaks.
-            if (prevVal > prevThreshold &&
-                val < prevVal &&
-                (i - lastBeatIndex) > CONSTANTS.BEAT_DETECTION.MIN_GAP_SAMPLES &&
-                runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE) {
+            if (BeatDetector.isPeak(prevVal, val, prevThreshold, runningMax) &&
+                (i - lastBeatIndex) > CONSTANTS.BEAT_DETECTION.MIN_GAP_SAMPLES) {
                 beatIndices.push(i - 1); // mark at the peak sample
                 lastBeatIndex = i - 1;
             }
@@ -461,48 +631,48 @@ const BeatDetector = {
 // RENDERER
 // ============================================================================
 const Renderer = {
-    drawSignal(canvas, ppgCtx, data, mode, viewStart, viewEnd) {
-        if (!data || !data.length) return;
-        
-        const viewData = data.slice(viewStart, viewEnd);
-        if (!viewData.length) return;
+    drawSignal(canvas, ppgCtx, data, mode, end) {
+        if (!data || !data.length || end === 0) return;
 
         const cy = canvas.height / 2;
         const sy = canvas.height / 2.2;
         const color = mode === 'simulate' ? '#a855f7' : (mode === 'review' ? '#f59e0b' : '#ef4444');
-        
+        const pps = canvas.width / CONSTANTS.DISPLAY.WINDOW_SECONDS;
+        const latestTime = data[end - 1].time;
+        const windowStart = latestTime - CONSTANTS.DISPLAY.WINDOW_SECONDS;
+
         ppgCtx.textAlign = "center";
         ppgCtx.textBaseline = "bottom";
         ppgCtx.font = "9px monospace";
-        
+
+        // Time marker grid lines (computed from time, not from data indices)
+        ppgCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ppgCtx.fillStyle = 'rgba(255,255,255,0.3)';
+        for (let s = Math.ceil(windowStart); s <= Math.floor(latestTime); s++) {
+            const x = (s - windowStart) * pps;
+            ppgCtx.beginPath();
+            ppgCtx.moveTo(x, 0);
+            ppgCtx.lineTo(x, canvas.height);
+            ppgCtx.stroke();
+            ppgCtx.fillText(s + 's', x, canvas.height - 2);
+        }
+
         const signalPath = [];
         const thresholdPath = [];
         const beatMarkers = [];
-        
-        for (let i = 0; i < viewData.length; i++) {
-            const d = viewData[i];
+
+        for (let i = 0; i < end; i++) {
+            const d = data[i];
+            const x = (d.time - windowStart) * pps;
+            if (x < 0) continue;
             const y = cy - d.val * sy;
-            
-            signalPath.push({ x: i, y });
-            thresholdPath.push({ x: i, y: cy - d.threshold * sy });
-            
-            if (d.beat) beatMarkers.push({ x: i, y });
-            
-            if (i > 0) {
-                const prevTime = viewData[i - 1].time;
-                if (Math.floor(d.time) !== Math.floor(prevTime)) {
-                    ppgCtx.beginPath();
-                    ppgCtx.strokeStyle = 'rgba(255,255,255,0.15)';
-                    ppgCtx.moveTo(i, 0);
-                    ppgCtx.lineTo(i, canvas.height);
-                    ppgCtx.stroke();
-                    
-                    ppgCtx.fillStyle = 'rgba(255,255,255,0.3)';
-                    ppgCtx.fillText(Math.floor(d.time) + 's', i, canvas.height - 2);
-                }
-            }
+            signalPath.push({ x, y });
+            thresholdPath.push({ x, y: cy - d.threshold * sy });
+            if (d.beat) beatMarkers.push({ x, y });
         }
-        
+
+        if (!signalPath.length) return;
+
         ppgCtx.beginPath();
         ppgCtx.strokeStyle = 'rgba(255,200,0,0.3)';
         ppgCtx.setLineDash([4, 4]);
@@ -511,7 +681,7 @@ const Renderer = {
         });
         ppgCtx.stroke();
         ppgCtx.setLineDash([]);
-        
+
         ppgCtx.beginPath();
         ppgCtx.strokeStyle = color;
         ppgCtx.lineWidth = 2;
@@ -519,12 +689,14 @@ const Renderer = {
             i === 0 ? ppgCtx.moveTo(p.x, p.y) : ppgCtx.lineTo(p.x, p.y);
         });
         ppgCtx.stroke();
-        
-        ppgCtx.lineTo(viewData.length - 1, canvas.height);
-        ppgCtx.lineTo(0, canvas.height);
+
+        const last = signalPath[signalPath.length - 1];
+        const first = signalPath[0];
+        ppgCtx.lineTo(last.x, canvas.height);
+        ppgCtx.lineTo(first.x, canvas.height);
         ppgCtx.fillStyle = color + "20";
         ppgCtx.fill();
-        
+
         ppgCtx.fillStyle = "#fff";
         beatMarkers.forEach(p => {
             ppgCtx.beginPath();
@@ -704,6 +876,8 @@ async function setMode(newMode) {
         AppState.clearHistory();
         SignalProcessor.reset();
         BeatDetector.reset();
+        BandpassFilter.reset();
+        FFTAnalyzer.reset();
         DOM.instructionOverlay.classList.add('hidden');
         DOM.modeBadge.classList.remove('hidden');
         DOM.modeBadge.innerText = 'CAMERA';
@@ -716,6 +890,8 @@ async function setMode(newMode) {
         AppState.simPhase = 0;
         SignalProcessor.reset();
         BeatDetector.reset();
+        BandpassFilter.reset();
+        FFTAnalyzer.reset();
         DOM.instructionOverlay.classList.add('hidden');
         DOM.modeBadge.classList.remove('hidden');
         DOM.modeBadge.innerText = 'SIMULATE';
@@ -803,6 +979,7 @@ function loadSettings() {
     DOM.settingPreview.checked = Config.showPreview;
     DOM.settingAutoStop.value = Config.autoStopSeconds;
     DOM.settingAutoSave.checked = Config.autoSave;
+    if (DOM.settingUseFFT) DOM.settingUseFFT.checked = Config.useFFT;
     DOM.settingBpmWindow.value = Config.bpmCalculationWindow;
     DOM.settingMaxRecords.value = Config.maxRecords;
     DOM.previewCanvas.classList.toggle('hidden', !Config.showPreview);
@@ -866,10 +1043,26 @@ function openReview(recording) {
     
     const values = recording.samples.map(s => s.v);
     const timestamps = recording.samples.map(s => s.t);
-    
-    const thresholds = BeatDetector.calculateThreshold(values);
-    const beatIndices = BeatDetector.detectBeats(values, thresholds);
-    const calculatedBpm = BeatDetector.calculateBPM(beatIndices, timestamps, Config.bpmCalculationWindow);
+
+    let analysisValues = values;
+    if (Config.useFFT) {
+        BandpassFilter.reset();
+        analysisValues = values.map((v, i) => {
+            const dt = i === 0 ? 1 / 30 : (timestamps[i] - timestamps[i - 1]);
+            return BandpassFilter.process(v, dt);
+        });
+    }
+
+    const thresholds = BeatDetector.calculateThreshold(analysisValues);
+    const beatIndices = BeatDetector.detectBeats(analysisValues, thresholds);
+
+    let calculatedBpm = BeatDetector.calculateBPM(beatIndices, timestamps, Config.bpmCalculationWindow);
+    if (Config.useFFT) {
+        FFTAnalyzer.reset();
+        analysisValues.forEach((v, i) => FFTAnalyzer.addSample(v, timestamps[i] * 1000));
+        const fftBpm = FFTAnalyzer.computeBPM();
+        if (fftBpm > 0) calculatedBpm = fftBpm;
+    }
 
     AppState.reviewData = recording.samples.map((sample, i) => ({
         time: sample.t,
@@ -916,10 +1109,18 @@ async function loop(timestamp) {
                 signal = SignalProcessor.generateSimulation(AppState.simPhase, AppState.simBpm, AppState.totalTime);
             }
             
-            const result = BeatDetector.process(signal, timestamp, Config.bpmCalculationWindow);
+            let processedSignal = signal;
+            if (Config.useFFT) {
+                processedSignal = BandpassFilter.process(signal, dt);
+                FFTAnalyzer.addSample(processedSignal, timestamp);
+            }
 
-            if (result.bpm > 0) {
-                UI.updateBPMDisplay(result.bpm);
+            const result = BeatDetector.process(processedSignal, timestamp, Config.bpmCalculationWindow);
+
+            const fftBpm = Config.useFFT ? FFTAnalyzer.computeBPM() : 0;
+            const displayBpm = fftBpm > 0 ? fftBpm : result.bpm;
+            if (displayBpm > 0) {
+                UI.updateBPMDisplay(displayBpm);
             }
 
             // Beat fires one sample after the peak (on the declining edge).
@@ -927,18 +1128,17 @@ async function loop(timestamp) {
             if (result.isBeat && AppState.history.length > 0) {
                 AppState.history[AppState.history.length - 1].beat = true;
             }
-            AppState.addHistoryPoint(AppState.totalTime, signal, result.threshold, false, result.bpm);
+            AppState.addHistoryPoint(AppState.totalTime, signal, result.threshold, false, displayBpm);
         }
     }
     
     const data = AppState.mode === 'review' ? AppState.reviewData : AppState.history;
     if (data && data.length > 0) {
         const end = AppState.mode === 'review' ? AppState.reviewOffset : data.length;
-        const start = Math.max(0, end - DOM.ppgCanvas.width);
-        
+
         ppgCtx.fillStyle = '#0f172a';
         ppgCtx.fillRect(0, 0, DOM.ppgCanvas.width, DOM.ppgCanvas.height);
-        Renderer.drawSignal(DOM.ppgCanvas, ppgCtx, data, AppState.mode, start, end);
+        Renderer.drawSignal(DOM.ppgCanvas, ppgCtx, data, AppState.mode, end);
         
         if (AppState.mode === 'review' && end > 0 && data[end - 1]) {
             const currentTime = data[end - 1].time;
@@ -995,6 +1195,16 @@ DOM.deleteOldestBtn.onclick = () => {
 DOM.settingPreview.onchange = saveSettings;
 DOM.settingAutoStop.oninput = saveSettings;
 DOM.settingAutoSave.onchange = saveSettings;
+// Separate from saveSettings because toggling FFT must also flush filter
+// state immediately so stale samples don't bleed into the new mode.
+if (DOM.settingUseFFT) {
+    DOM.settingUseFFT.onchange = () => {
+        Config.useFFT = DOM.settingUseFFT.checked;
+        Config.save();
+        BandpassFilter.reset();
+        FFTAnalyzer.reset();
+    };
+}
 DOM.settingBpmWindow.oninput = saveSettings;
 DOM.settingMaxRecords.oninput = saveSettings;
 
@@ -1033,26 +1243,22 @@ resizeCanvas();
 // ============================================================================
 // CANVAS TAP TO RECORD
 // ============================================================================
-document.getElementById('canvasContainer').addEventListener('touchstart', e => {
+function handleCanvasTap() {
     const mode = AppState.mode;
     if (mode === 'review') return;
-    e.preventDefault();
     if (mode === 'idle') {
         setMode('camera');
     } else if (mode === 'camera' || mode === 'simulate') {
         setMode('idle');
     }
+}
+
+document.getElementById('canvasContainer').addEventListener('touchstart', e => {
+    e.preventDefault();
+    handleCanvasTap();
 }, { passive: false });
 
-document.getElementById('canvasContainer').addEventListener('click', e => {
-    const mode = AppState.mode;
-    if (mode === 'review') return;
-    if (mode === 'idle') {
-        setMode('camera');
-    } else if (mode === 'camera' || mode === 'simulate') {
-        setMode('idle');
-    }
-});
+document.getElementById('canvasContainer').addEventListener('click', handleCanvasTap);
 
 // ============================================================================
 // INITIALIZATION

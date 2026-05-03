@@ -1,7 +1,7 @@
 # heart-rate
 Heart rate monitor and recorder
 
-**Try it:** https://raw.githack.com/smusamashah/heart-rate/claude/fix-beat-detection-SnYSX/index.html
+**Try it:** https://raw.githack.com/smusamashah/heart-rate/claude/fft-beat-detection-FkPQm/index.html
 
 I needed this because yesterday my heart rate shot to 200 (jolted off a nap in a train) and most apps failed to read it, including Google Fit. I could feel my heart pounding crazily but I couldn't actually check it.
 
