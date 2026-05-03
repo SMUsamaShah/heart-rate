@@ -65,8 +65,8 @@ const CONSTANTS = {
     },
 
     DISPLAY: {
-        WINDOW_SECONDS: 15,
-        HISTORY_SECONDS: 25
+        WINDOW_SECONDS: 10,
+        HISTORY_SECONDS: 20
     }
 };
 
@@ -234,8 +234,13 @@ const Camera = {
     
     stop() {
         if (this.stream) {
+            if (this.torchSupported) {
+                const track = this.stream.getVideoTracks()[0];
+                if (track) track.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {});
+            }
             this.stream.getTracks().forEach(t => t.stop());
             this.stream = null;
+            this.torchSupported = false;
         }
         DOM.video.srcObject = null;
     }
