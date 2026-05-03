@@ -791,27 +791,52 @@ const Renderer = {
         ppgCtx.stroke();
         ppgCtx.setLineDash([]);
 
+        // Gradient fill under signal
+        const last = signalPath[signalPath.length - 1];
+        const first = signalPath[0];
         ppgCtx.beginPath();
-        ppgCtx.strokeStyle = color;
-        ppgCtx.lineWidth = 2;
+        signalPath.forEach((p, i) => {
+            i === 0 ? ppgCtx.moveTo(p.x, p.y) : ppgCtx.lineTo(p.x, p.y);
+        });
+        ppgCtx.lineTo(last.x, canvas.height);
+        ppgCtx.lineTo(first.x, canvas.height);
+        ppgCtx.closePath();
+        const fillGrad = ppgCtx.createLinearGradient(0, 0, 0, canvas.height);
+        fillGrad.addColorStop(0, color + '55');
+        fillGrad.addColorStop(0.6, color + '20');
+        fillGrad.addColorStop(1, color + '05');
+        ppgCtx.fillStyle = fillGrad;
+        ppgCtx.fill();
+
+        // Signal glow
+        ppgCtx.beginPath();
+        ppgCtx.strokeStyle = color + '35';
+        ppgCtx.lineWidth = 7;
+        ppgCtx.setLineDash([]);
         signalPath.forEach((p, i) => {
             i === 0 ? ppgCtx.moveTo(p.x, p.y) : ppgCtx.lineTo(p.x, p.y);
         });
         ppgCtx.stroke();
 
-        const last = signalPath[signalPath.length - 1];
-        const first = signalPath[0];
-        ppgCtx.lineTo(last.x, canvas.height);
-        ppgCtx.lineTo(first.x, canvas.height);
-        ppgCtx.fillStyle = color + "20";
-        ppgCtx.fill();
+        // Signal line
+        ppgCtx.beginPath();
+        ppgCtx.strokeStyle = color;
+        ppgCtx.lineWidth = 2.5;
+        signalPath.forEach((p, i) => {
+            i === 0 ? ppgCtx.moveTo(p.x, p.y) : ppgCtx.lineTo(p.x, p.y);
+        });
+        ppgCtx.stroke();
 
-        ppgCtx.fillStyle = "#fff";
+        // Beat markers
+        ppgCtx.fillStyle = '#fff';
+        ppgCtx.shadowColor = '#fff';
+        ppgCtx.shadowBlur = 6;
         beatMarkers.forEach(p => {
             ppgCtx.beginPath();
-            ppgCtx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+            ppgCtx.arc(p.x, p.y, 4, 0, Math.PI * 2);
             ppgCtx.fill();
         });
+        ppgCtx.shadowBlur = 0;
     }
 };
 
@@ -1153,16 +1178,20 @@ function renderRecordingsList() {
     
     records.forEach(r => {
         const d = new Date(r.timestamp);
-        const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const dateStr = d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const timeStr = `${hh}:${mm}`;
+        const day = String(d.getDate()).padStart(2, '0');
+        const mon = String(d.getMonth() + 1).padStart(2, '0');
+        const yr = d.getFullYear();
+        const dateStr = `${day}/${mon}/${yr}`;
         const div = document.createElement('div');
         div.className = 'recording-item';
 
         div.innerHTML = `
             <div class="recording-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M3 12h2l2-7 4 14 3-9 2 2h5"/>
-                    <polyline points="3,12 5,12 7,5 11,19 14,10 16,12 21,12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <svg width="18" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="1,7 4,7 6,1 9,13 12,4 15,7 21,7"/>
                 </svg>
             </div>
             <div class="recording-info">
@@ -1294,7 +1323,7 @@ async function loop(timestamp) {
     if (data && data.length > 0) {
         const end = AppState.mode === 'review' ? AppState.reviewOffset : data.length;
 
-        ppgCtx.fillStyle = '#0f172a';
+        ppgCtx.fillStyle = '#080d18';
         ppgCtx.fillRect(0, 0, DOM.ppgCanvas.width, DOM.ppgCanvas.height);
         Renderer.drawSignal(DOM.ppgCanvas, ppgCtx, data, AppState.mode, end);
         

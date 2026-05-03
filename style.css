@@ -164,7 +164,7 @@ video { display: none; }
 }
 
 .bpm-number {
-    font-size: 54px;
+    font-size: 64px;
     font-weight: 800;
     line-height: 1;
     color: var(--text);
@@ -247,7 +247,7 @@ video { display: none; }
 }
 
 .zone-name {
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 700;
     color: var(--amber);
     margin-bottom: 2px;
@@ -350,7 +350,7 @@ video { display: none; }
 
 #canvasContainer {
     position: relative;
-    height: 200px;
+    height: 230px;
     background: #080d18;
 }
 
@@ -448,7 +448,7 @@ video { display: none; }
 }
 
 .stat-val {
-    font-size: 17px;
+    font-size: 20px;
     font-weight: 700;
     color: var(--text);
     line-height: 1.2;
@@ -806,6 +806,7 @@ input[type="range"] {
     align-items: center;
     justify-content: center;
     padding: 0 20px;
+    margin-top: -16px;
 }
 
 .nav-fab {
