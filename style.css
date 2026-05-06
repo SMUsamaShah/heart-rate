@@ -50,8 +50,8 @@ video { display: none; }
 
 .app-title {
     margin: 0;
-    font-size: 26px;
-    font-weight: 700;
+    font-size: 30px;
+    font-weight: 800;
     color: var(--text);
     line-height: 1;
 }
@@ -164,7 +164,7 @@ video { display: none; }
 }
 
 .bpm-number {
-    font-size: 64px;
+    font-size: 76px;
     font-weight: 800;
     line-height: 1;
     color: var(--text);
@@ -174,19 +174,19 @@ video { display: none; }
 .bpm-meta {
     display: flex;
     flex-direction: column;
-    gap: 1px;
-    padding-top: 14px;
+    gap: 2px;
+    padding-top: 18px;
 }
 
 .heart-icon {
-    font-size: 22px;
+    font-size: 24px;
     color: #ff4d6d;
     line-height: 1;
 }
 
 .bpm-unit {
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 700;
     color: var(--text-muted);
 }
 
@@ -419,10 +419,10 @@ video { display: none; }
     background: var(--bg-card);
     border-radius: 14px;
     border: 1px solid var(--border);
-    padding: 12px 10px;
+    padding: 12px 8px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .stat-icon {
@@ -449,15 +449,21 @@ video { display: none; }
 }
 
 .stat-val {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--text);
-    line-height: 1.2;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
     font-variant-numeric: tabular-nums;
 }
 
-.stat-val small {
-    font-size: 10px;
+.stat-num {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+}
+
+.stat-bpm {
+    font-size: 11px;
     font-weight: 500;
     color: var(--text-muted);
 }
@@ -621,8 +627,11 @@ video { display: none; }
     padding: 4px 2px;
     flex-shrink: 0;
     line-height: 1;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
 }
 
+.recording-item:hover .delete-btn { opacity: 1; }
 .delete-btn:hover { color: var(--red); }
 
 .empty-state {
@@ -772,9 +781,9 @@ input[type="range"] {
     flex-shrink: 0;
     display: flex;
     align-items: center;
-    background: var(--bg);
-    border-top: 1px solid var(--border);
-    height: calc(62px + env(safe-area-inset-bottom));
+    background: linear-gradient(to bottom, #12182e 0%, #0a0e1a 55%);
+    box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.05);
+    height: calc(68px + env(safe-area-inset-bottom));
     padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -807,41 +816,41 @@ input[type="range"] {
     align-items: center;
     justify-content: center;
     padding: 0 20px;
-    margin-top: -16px;
+    margin-top: -32px;
 }
 
 .nav-fab {
-    width: 58px;
-    height: 58px;
+    width: 64px;
+    height: 64px;
     border-radius: 50%;
     background: var(--blue);
-    border: none;
+    border: 4px solid #0a0e1a;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.45);
+    box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
     transition: transform 0.15s, box-shadow 0.15s, background 0.2s;
     color: white;
 }
 
 .nav-fab:active {
     transform: scale(0.93);
-    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);
+    box-shadow: 0 3px 10px rgba(59, 130, 246, 0.35);
 }
 
 .nav-fab.recording {
     background: #ef4444;
-    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.45);
+    box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5);
 }
 
-.nav-fab svg { width: 26px; height: 26px; }
+.nav-fab svg { width: 28px; height: 28px; }
 
 /* ============================================================
    REVIEW OVERLAY
    ============================================================ */
 #reviewControls {
     position: fixed;
-    bottom: calc(62px + env(safe-area-inset-bottom));
+    bottom: calc(68px + env(safe-area-inset-bottom));
     left: 0;
     right: 0;
     z-index: 50;
@@ -923,7 +932,7 @@ input[type="range"].scrubber::-webkit-slider-thumb {
    ============================================================ */
 #saveBtn {
     position: fixed;
-    bottom: calc(72px + env(safe-area-inset-bottom));
+    bottom: calc(78px + env(safe-area-inset-bottom));
     right: 16px;
     padding: 10px 20px;
     background: #22c55e;

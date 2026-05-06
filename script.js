@@ -724,7 +724,7 @@ const Renderer = {
 
         const cy = canvas.height / 2;
         const sy = canvas.height / 2.2;
-        const color = mode === 'simulate' ? '#a855f7' : (mode === 'review' ? '#f59e0b' : '#ef4444');
+        const color = mode === 'review' ? '#f59e0b' : '#ef4444';
         const windowSec = AppState.windowSeconds || CONSTANTS.DISPLAY.WINDOW_SECONDS;
         const pps = canvas.width / windowSec;
         const latestTime = data[end - 1].time;
