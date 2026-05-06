@@ -137,7 +137,7 @@ video { display: none; }
    BPM CARD
    ============================================================ */
 .bpm-card {
-    padding: 16px;
+    padding: 18px 16px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -159,7 +159,7 @@ video { display: none; }
 
 .bpm-row {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 6px;
 }
 
@@ -175,16 +175,17 @@ video { display: none; }
     display: flex;
     flex-direction: column;
     gap: 1px;
+    padding-top: 14px;
 }
 
 .heart-icon {
-    font-size: 18px;
+    font-size: 22px;
     color: #ff4d6d;
     line-height: 1;
 }
 
 .bpm-unit {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text-muted);
 }
@@ -985,3 +986,4 @@ input[type="range"].scrubber::-webkit-slider-thumb {
    UTILITY
    ============================================================ */
 .hidden { display: none !important; }
+#modeBadge { display: none !important; }

@@ -71,7 +71,7 @@ const CONSTANTS = {
 };
 
 const Config = {
-    showPreview: true,
+    showPreview: false,
     autoStopSeconds: 0,
     autoSave: true,
     useFFT: false,
@@ -1457,6 +1457,7 @@ document.getElementById('canvasContainer').addEventListener('click', () => {
 loadSettings();
 renderRecordingsList();
 UI.switchTab('history');
+drawGauge(0);
 loop(performance.now());
 
 // ============================================================================
