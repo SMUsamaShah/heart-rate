@@ -1254,6 +1254,7 @@ function handleCanvasTap() {
 }
 
 document.getElementById('canvasContainer').addEventListener('touchstart', e => {
+    if (e.target.closest('button')) return;
     e.preventDefault();
     handleCanvasTap();
 }, { passive: false });
