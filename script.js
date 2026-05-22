@@ -70,6 +70,9 @@ const CONSTANTS = {
     }
 };
 
+// Must match CACHE_NAME in sw.js — used for the version display in Settings.
+const APP_CACHE = 'pulse-v8';
+
 const Config = {
     showPreview: true,
     autoStopSeconds: 0,
@@ -1285,6 +1288,21 @@ renderRecordingsList();
 UI.switchTab('history');
 loop(performance.now());
 
+(function() {
+    const versionEl = document.getElementById('versionInfo');
+    if (!versionEl) return;
+    const ua = navigator.userAgent;
+    let browser = 'Browser';
+    // navigator.brave is only defined in Brave; its UA string otherwise says "Chrome"
+    if (navigator.brave) browser = 'Brave';
+    else if (ua.includes('SamsungBrowser')) browser = 'Samsung';
+    else if (ua.includes('Firefox')) browser = 'Firefox';
+    else if (ua.includes('OPR') || ua.includes('Opera')) browser = 'Opera';
+    else if (ua.includes('Chrome')) browser = 'Chrome';
+    else if (ua.includes('Safari')) browser = 'Safari';
+    versionEl.textContent = `${APP_CACHE} · ${browser}`;
+})();
+
 // ============================================================================
 // SERVICE WORKER REGISTRATION
 // ============================================================================
@@ -1340,6 +1358,20 @@ if ('serviceWorker' in navigator) {
         });
 
         window.addEventListener('appinstalled', hideBanner);
+
+        // Fallback for Android browsers that never fire beforeinstallprompt
+        // (Firefox, Opera, etc.) — show generic "use browser menu" instructions.
+        if (/android/i.test(navigator.userAgent)) {
+            setTimeout(() => {
+                if (deferredPrompt) return; // Chromium already handled it
+                hint.textContent = 'Tap your browser menu (⋮) → "Add to Home Screen"';
+                installBtn.textContent = 'How?';
+                installBtn.addEventListener('click', () => {
+                    alert('To install:\n1. Tap the menu button (⋮ or ☰) in your browser\n2. Tap "Add to Home Screen" or "Install app"\n3. Tap "Add"');
+                });
+                showBanner();
+            }, 3000);
+        }
     }
 })();
 
