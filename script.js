@@ -21,7 +21,7 @@ const CONSTANTS = {
         THRESHOLD_MULTIPLIER: 0.45,
         BASE_THRESHOLD: 0.05,
         REFRACTORY_PERIOD_MS: 250,
-        REFRACTORY_MIN_MS: 250,
+        REFRACTORY_MIN_MS: 200,
         REFRACTORY_MAX_MS: 1000,
         REFRACTORY_FACTOR: 0.6
     },
@@ -69,6 +69,9 @@ const CONSTANTS = {
         HISTORY_SECONDS: 20
     }
 };
+
+// Must match CACHE_NAME in sw.js — used for the version display in Settings.
+const APP_CACHE = 'pulse-v8';
 
 const Config = {
     showPreview: true,
@@ -508,7 +511,7 @@ const BeatDetector = {
     prevSignal: 0,
 
     reset() {
-        this.lastBeatTime = 0;
+        this.lastBeatTime = Number.NEGATIVE_INFINITY;
         this.refractoryPeriod = CONSTANTS.BEAT_DETECTION.REFRACTORY_PERIOD_MS;
         this.runningMax = 0.1;
         this.threshold = CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD;
@@ -844,11 +847,16 @@ const UI = {
 async function setMode(newMode) {
     if (AppState.mode === newMode) return;
     
-    // AUTO-SAVE CHECK when stopping recording
-    if ((AppState.mode === 'camera' || AppState.mode === 'simulate') && newMode === 'idle') {
+    // AUTO-SAVE: only real camera recordings — never save simulation data
+    if (AppState.mode === 'camera' && newMode === 'idle') {
         if (Config.autoSave && AppState.history.length > 0) {
             saveRecording();
         }
+    }
+    // Discard simulation history before mode changes so the save button
+    // never appears and manual saving is also prevented.
+    if (AppState.mode === 'simulate' && newMode === 'idle') {
+        AppState.clearHistory();
     }
     
     if (AppState.mode === 'camera') {
@@ -1040,46 +1048,60 @@ function renderRecordingsList() {
 
 function openReview(recording) {
     setMode('review');
-    
-    const values = recording.samples.map(s => s.v);
-    const timestamps = recording.samples.map(s => s.t);
 
-    let analysisValues = values;
-    if (Config.useFFT) {
-        BandpassFilter.reset();
-        analysisValues = values.map((v, i) => {
-            const dt = i === 0 ? 1 / 30 : (timestamps[i] - timestamps[i - 1]);
-            return BandpassFilter.process(v, dt);
+    // Replay the stored signal through the exact same pipeline as live mode
+    // so that beat markers and BPM values are identical to what was shown live.
+    BeatDetector.reset();
+    BandpassFilter.reset();
+    FFTAnalyzer.reset();
+
+    const reviewData = [];
+
+    for (let i = 0; i < recording.samples.length; i++) {
+        const sample = recording.samples[i];
+        const prevSample = recording.samples[i - 1];
+        // Convert recorded seconds to ms for the refractory-period arithmetic
+        // that BeatDetector.process() performs — identical to the live rAF path.
+        const timestampMs = sample.t * 1000;
+
+        let processedSignal = sample.v;
+        if (Config.useFFT) {
+            const dt = prevSample ? (sample.t - prevSample.t) : (1 / 30);
+            processedSignal = BandpassFilter.process(sample.v, dt);
+            FFTAnalyzer.addSample(processedSignal, timestampMs);
+        }
+
+        const result = BeatDetector.process(processedSignal, timestampMs, Config.bpmCalculationWindow);
+
+        reviewData.push({
+            time: sample.t,
+            val: sample.v,
+            threshold: result.threshold,
+            beat: false,
+            bpm: result.bpm
         });
+
+        // Same retroactive peak-marking as live mode: the beat fires on the
+        // declining sample, so mark the previous entry (the actual peak).
+        if (result.isBeat && reviewData.length > 1) {
+            reviewData[reviewData.length - 2].beat = true;
+        }
     }
 
-    const thresholds = BeatDetector.calculateThreshold(analysisValues);
-    const beatIndices = BeatDetector.detectBeats(analysisValues, thresholds);
-
-    let calculatedBpm = BeatDetector.calculateBPM(beatIndices, timestamps, Config.bpmCalculationWindow);
-    if (Config.useFFT) {
-        FFTAnalyzer.reset();
-        analysisValues.forEach((v, i) => FFTAnalyzer.addSample(v, timestamps[i] * 1000));
-        const fftBpm = FFTAnalyzer.computeBPM();
-        if (fftBpm > 0) calculatedBpm = fftBpm;
-    }
-
-    AppState.reviewData = recording.samples.map((sample, i) => ({
-        time: sample.t,
-        val: sample.v,
-        threshold: thresholds[i].threshold,
-        beat: beatIndices.includes(i),
-        bpm: calculatedBpm || recording.avgBpm
-    }));
-    
+    AppState.reviewData = reviewData;
     AppState.reviewData.duration = recording.duration;
-    
+
     DOM.historySlider.min = 0;
     DOM.historySlider.max = recording.samples.length;
     DOM.historySlider.value = recording.samples.length;
     AppState.reviewOffset = recording.samples.length;
-    
-    UI.updateBPMDisplay(calculatedBpm || recording.avgBpm);
+
+    // Display the BPM that was live at the end of the recording.
+    let finalBpm = recording.avgBpm;
+    for (let i = reviewData.length - 1; i >= 0; i--) {
+        if (reviewData[i].bpm > 0) { finalBpm = reviewData[i].bpm; break; }
+    }
+    UI.updateBPMDisplay(finalBpm);
 }
 
 // ============================================================================
@@ -1144,18 +1166,15 @@ async function loop(timestamp) {
             const currentTime = data[end - 1].time;
             const totalTime = data[data.length - 1].time;
             DOM.reviewTimeDisplay.innerText = `-${(totalTime - currentTime).toFixed(1)}s`;
-            
-            const recentBeats = [];
-            for (let i = end - 1; i >= 0 && recentBeats.length < Config.bpmCalculationWindow; i--) {
-                if (data[i].beat) {
-                    recentBeats.push(data[i].time);
+
+            // Read the running BPM stored at the current slider position.
+            // These values were computed by the exact same BeatDetector.process()
+            // algorithm used during live recording, so review and live are identical.
+            for (let i = end - 1; i >= 0; i--) {
+                if (data[i].bpm > 0) {
+                    UI.updateBPMDisplay(data[i].bpm);
+                    break;
                 }
-            }
-            
-            if (recentBeats.length >= 2) {
-                const timeSpan = recentBeats[0] - recentBeats[recentBeats.length - 1];
-                const displayBpm = Math.round(60 * (recentBeats.length - 1) / timeSpan);
-                UI.updateBPMDisplay(displayBpm);
             }
         }
     }
@@ -1269,6 +1288,21 @@ renderRecordingsList();
 UI.switchTab('history');
 loop(performance.now());
 
+(function() {
+    const versionEl = document.getElementById('versionInfo');
+    if (!versionEl) return;
+    const ua = navigator.userAgent;
+    let browser = 'Browser';
+    // navigator.brave is only defined in Brave; its UA string otherwise says "Chrome"
+    if (navigator.brave) browser = 'Brave';
+    else if (ua.includes('SamsungBrowser')) browser = 'Samsung';
+    else if (ua.includes('Firefox')) browser = 'Firefox';
+    else if (ua.includes('OPR') || ua.includes('Opera')) browser = 'Opera';
+    else if (ua.includes('Chrome')) browser = 'Chrome';
+    else if (ua.includes('Safari')) browser = 'Safari';
+    versionEl.textContent = `${APP_CACHE} · ${browser}`;
+})();
+
 // ============================================================================
 // SERVICE WORKER REGISTRATION
 // ============================================================================
@@ -1324,6 +1358,20 @@ if ('serviceWorker' in navigator) {
         });
 
         window.addEventListener('appinstalled', hideBanner);
+
+        // Fallback for Android browsers that never fire beforeinstallprompt
+        // (Firefox, Opera, etc.) — show generic "use browser menu" instructions.
+        if (/android/i.test(navigator.userAgent)) {
+            setTimeout(() => {
+                if (deferredPrompt) return; // Chromium already handled it
+                hint.textContent = 'Tap your browser menu (⋮) → "Add to Home Screen"';
+                installBtn.textContent = 'How?';
+                installBtn.addEventListener('click', () => {
+                    alert('To install:\n1. Tap the menu button (⋮ or ☰) in your browser\n2. Tap "Add to Home Screen" or "Install app"\n3. Tap "Add"');
+                });
+                showBanner();
+            }, 3000);
+        }
     }
 })();
 
