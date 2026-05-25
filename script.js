@@ -21,7 +21,7 @@ const CONSTANTS = {
         THRESHOLD_MULTIPLIER: 0.45,
         BASE_THRESHOLD: 0.05,
         REFRACTORY_PERIOD_MS: 250,
-        REFRACTORY_MIN_MS: 200,
+        REFRACTORY_MIN_MS: 150,
         REFRACTORY_MAX_MS: 1000,
         REFRACTORY_FACTOR: 0.6
     },
@@ -1064,10 +1064,9 @@ function openReview(recording) {
         // that BeatDetector.process() performs — identical to the live rAF path.
         const timestampMs = sample.t * 1000;
 
-        let processedSignal = sample.v;
+        const dt = prevSample ? (sample.t - prevSample.t) : (1 / 30);
+        let processedSignal = BandpassFilter.process(sample.v, dt);
         if (Config.useFFT) {
-            const dt = prevSample ? (sample.t - prevSample.t) : (1 / 30);
-            processedSignal = BandpassFilter.process(sample.v, dt);
             FFTAnalyzer.addSample(processedSignal, timestampMs);
         }
 
@@ -1131,9 +1130,8 @@ async function loop(timestamp) {
                 signal = SignalProcessor.generateSimulation(AppState.simPhase, AppState.simBpm, AppState.totalTime);
             }
             
-            let processedSignal = signal;
+            let processedSignal = BandpassFilter.process(signal, dt);
             if (Config.useFFT) {
-                processedSignal = BandpassFilter.process(signal, dt);
                 FFTAnalyzer.addSample(processedSignal, timestamp);
             }
 
