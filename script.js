@@ -15,15 +15,23 @@ const CONSTANTS = {
     },
     
     BEAT_DETECTION: {
-        MIN_GAP_SAMPLES: 15,
         MIN_AMPLITUDE: 0.15,
-        DECAY_RATE: 0.99,
+        // Running-max decay per second (equivalent to the old 0.99/frame at
+        // 30fps). Applied time-based so the threshold behaves identically at
+        // 15, 30 or 60fps.
+        DECAY_PER_SECOND: 0.74,
         THRESHOLD_MULTIPLIER: 0.45,
         BASE_THRESHOLD: 0.05,
         REFRACTORY_PERIOD_MS: 250,
         REFRACTORY_MIN_MS: 200,
         REFRACTORY_MAX_MS: 1000,
-        REFRACTORY_FACTOR: 0.6
+        // Fraction of the current beat interval used as the refractory period.
+        // MUST stay below 0.5: when the heart rate doubles faster than the
+        // displayed BPM tracks it (e.g. 75 -> 200), every other beat lands
+        // inside the refractory window and the detector locks onto half the
+        // real rate. With factor f, that lock keeps refractory = f * 2 *
+        // trueInterval, so only f < 0.5 lets the true rate break back in.
+        REFRACTORY_FACTOR: 0.45
     },
     
     BPM: {
@@ -34,10 +42,20 @@ const CONSTANTS = {
     
     SIMULATION: {
         DEFAULT_BPM: 75,
-        GAUSSIAN_P_WAVE: { amplitude: 0.3, center: 0.5, width: 0.12 },
         GAUSSIAN_QRS: { amplitude: 1.0, center: 0.2, width: 0.08 },
-        NOISE_AMPLITUDE: 0.1,
-        SIGNAL_SCALE: 0.05
+        // Secondary (dicrotic-like) wave, centered inside the refractory
+        // window (center < REFRACTORY_FACTOR) like a real PPG notch — also
+        // exercises the detector's double-count rejection.
+        GAUSSIAN_DICROTIC: { amplitude: 0.3, center: 0.35, width: 0.12 },
+        SIGNAL_SCALE: 0.05,
+        // Real-world imperfections, as fractions of the QRS amplitude:
+        HRV_JITTER: 0.04,             // per-beat interval variation (±4%)
+        AMPLITUDE_JITTER: 0.15,       // per-beat amplitude variation (±15%)
+        NOISE_AMPLITUDE: 0.05,        // white sensor noise
+        BASELINE_WANDER_AMPLITUDE: 0.2, // slow respiratory-like drift
+        BASELINE_WANDER_HZ: 0.25,     // ~15 breaths/min
+        ARTIFACTS_PER_SECOND: 0.05,   // rare motion-artifact spikes
+        ARTIFACT_AMPLITUDE: 1.2
     },
     
     STORAGE: {
@@ -71,7 +89,7 @@ const CONSTANTS = {
 };
 
 // Must match CACHE_NAME in sw.js — used for the version display in Settings.
-const APP_CACHE = 'pulse-v8';
+const APP_CACHE = 'pulse-v9';
 
 const Config = {
     showPreview: true,
@@ -164,7 +182,6 @@ const AppState = {
     mode: 'idle',
     totalTime: 0,
     lastTime: null,
-    simPhase: 0,
     simBpm: CONSTANTS.SIMULATION.DEFAULT_BPM,
     history: [],
     reviewData: null,
@@ -285,12 +302,23 @@ const SignalProcessor = {
     currentGain: 1.0,
     signalMean: 0,
     framesSinceStart: 0,
-    
+    simState: null,
+
     reset() {
         this.recentValues = [];
         this.currentGain = 1.0;
         this.signalMean = 0;
         this.framesSinceStart = 0;
+        this.resetSimulation();
+    },
+
+    resetSimulation() {
+        this.simState = {
+            beatPhase: 0,       // seconds into the current beat
+            beatDuration: 0,    // 0 = pick a fresh beat on the next sample
+            beatAmplitude: 1,
+            wanderPhase: Math.random() * 2 * Math.PI
+        };
     },
     
     normalize(val) {
@@ -338,21 +366,47 @@ const SignalProcessor = {
         return { signal: this.normalize(this.signalMean - avg), isSaturated };
     },
     
-    generateSimulation(phase, bpm, totalTime) {
-        const duration = 60 / bpm;
-        const t = (phase % duration) / duration;
-        
-        const gaussian = (params) => {
-            const { amplitude, center, width } = params;
-            return amplitude * Math.exp(-Math.pow(t - center, 2) / (2 * width * width));
-        };
-        
-        const signal = 
-            gaussian(CONSTANTS.SIMULATION.GAUSSIAN_QRS) + 
-            gaussian(CONSTANTS.SIMULATION.GAUSSIAN_P_WAVE) + 
-            Math.sin(totalTime) * CONSTANTS.SIMULATION.NOISE_AMPLITUDE;
-        
-        return this.normalize(signal * CONSTANTS.SIMULATION.SIGNAL_SCALE);
+    // Synthesizes a PPG-like waveform with real-world imperfections: per-beat
+    // interval jitter (HRV), per-beat amplitude variation, slow baseline
+    // wander, white noise and occasional motion-artifact spikes. dt is the
+    // elapsed time since the previous sample, in seconds.
+    generateSimulation(dt, targetBpm) {
+        const SIM = CONSTANTS.SIMULATION;
+        if (!this.simState) this.resetSimulation();
+        const st = this.simState;
+
+        if (st.beatDuration <= 0) this.startSimulationBeat(targetBpm);
+        st.beatPhase += dt;
+        while (st.beatPhase >= st.beatDuration) {
+            st.beatPhase -= st.beatDuration;
+            this.startSimulationBeat(targetBpm);
+        }
+
+        const t = st.beatPhase / st.beatDuration;
+        const gaussian = ({ amplitude, center, width }) =>
+            amplitude * Math.exp(-Math.pow(t - center, 2) / (2 * width * width));
+
+        let signal = st.beatAmplitude *
+            (gaussian(SIM.GAUSSIAN_QRS) + gaussian(SIM.GAUSSIAN_DICROTIC));
+
+        st.wanderPhase += dt * 2 * Math.PI * SIM.BASELINE_WANDER_HZ;
+        signal += Math.sin(st.wanderPhase) * SIM.BASELINE_WANDER_AMPLITUDE;
+        signal += (Math.random() * 2 - 1) * SIM.NOISE_AMPLITUDE;
+        if (Math.random() < SIM.ARTIFACTS_PER_SECOND * dt) {
+            signal += (Math.random() * 2 - 1) * SIM.ARTIFACT_AMPLITUDE;
+        }
+
+        return this.normalize(signal * SIM.SIGNAL_SCALE);
+    },
+
+    // BPM slider changes take effect here, at the beat boundary, so there is
+    // no mid-cycle phase jump in the waveform.
+    startSimulationBeat(targetBpm) {
+        const SIM = CONSTANTS.SIMULATION;
+        this.simState.beatDuration =
+            (60 / targetBpm) * (1 + (Math.random() * 2 - 1) * SIM.HRV_JITTER);
+        this.simState.beatAmplitude =
+            1 + (Math.random() * 2 - 1) * SIM.AMPLITUDE_JITTER;
     }
 };
 
@@ -502,7 +556,8 @@ const FFTAnalyzer = {
 // BEAT DETECTION
 // ============================================================================
 const BeatDetector = {
-    lastBeatTime: 0,
+    lastBeatTime: Number.NEGATIVE_INFINITY,
+    lastSampleTime: null,
     refractoryPeriod: CONSTANTS.BEAT_DETECTION.REFRACTORY_PERIOD_MS,
     runningMax: 0.1,
     threshold: CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD,
@@ -512,6 +567,7 @@ const BeatDetector = {
 
     reset() {
         this.lastBeatTime = Number.NEGATIVE_INFINITY;
+        this.lastSampleTime = null;
         this.refractoryPeriod = CONSTANTS.BEAT_DETECTION.REFRACTORY_PERIOD_MS;
         this.runningMax = 0.1;
         this.threshold = CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD;
@@ -526,15 +582,41 @@ const BeatDetector = {
                runningMax > CONSTANTS.BEAT_DETECTION.MIN_AMPLITUDE;
     },
 
+    // Trimmed mean of the recent inter-beat intervals: the top and bottom
+    // quarter are dropped, so a missed beat (2x interval) or a stray double
+    // detection (0.5x interval) cannot drag the BPM, while frame-quantized
+    // intervals still average out to the true rate.
+    robustInterval() {
+        const intervals = [];
+        for (let i = 1; i < this.detectedBeats.length; i++) {
+            intervals.push(this.detectedBeats[i] - this.detectedBeats[i - 1]);
+        }
+        intervals.sort((a, b) => a - b);
+
+        const trim = Math.floor(intervals.length / 4);
+        let sum = 0, count = 0;
+        for (let i = trim; i < intervals.length - trim; i++) {
+            sum += intervals[i];
+            count++;
+        }
+        return sum / count;
+    },
+
     process(signal, timestamp, bpmWindow) {
-        this.runningMax *= CONSTANTS.BEAT_DETECTION.DECAY_RATE;
+        // Time-based decay so the adaptive threshold behaves the same
+        // regardless of camera frame rate (torch mode often halves it).
+        const dtMs = this.lastSampleTime === null ? 33 :
+            Math.max(0, Math.min(timestamp - this.lastSampleTime, 100));
+        this.lastSampleTime = timestamp;
+
+        this.runningMax *= Math.pow(CONSTANTS.BEAT_DETECTION.DECAY_PER_SECOND, dtMs / 1000);
         this.threshold = Math.max(
             this.runningMax * CONSTANTS.BEAT_DETECTION.THRESHOLD_MULTIPLIER,
             CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD
         );
-        
+
         if (signal > this.runningMax) this.runningMax = signal;
-        
+
         let isBeat = false;
 
         // Fire when the previous sample was above threshold and signal is now declining.
@@ -546,23 +628,17 @@ const BeatDetector = {
             this.lastBeatTime = timestamp;
             isBeat = true;
             this.detectedBeats.push(timestamp);
-            
+
             while(this.detectedBeats.length > bpmWindow) {
                 this.detectedBeats.shift();
             }
 
             if (this.detectedBeats.length >= 2) {
-                let sum = 0;
-                for (let i = 1; i < this.detectedBeats.length; i++) {
-                    sum += (this.detectedBeats[i] - this.detectedBeats[i-1]);
-                }
-                
-                const avgInterval = sum / (this.detectedBeats.length - 1);
-                const newBpm = CONSTANTS.BPM.MS_PER_MINUTE / avgInterval;
-                
-                this.bpm = this.bpm === 0 ? newBpm : 
+                const newBpm = CONSTANTS.BPM.MS_PER_MINUTE / this.robustInterval();
+
+                this.bpm = this.bpm === 0 ? newBpm :
                     (this.bpm * CONSTANTS.BPM.SMOOTHING + newBpm * (1 - CONSTANTS.BPM.SMOOTHING));
-                
+
                 this.refractoryPeriod = Math.max(
                     CONSTANTS.BEAT_DETECTION.REFRACTORY_MIN_MS,
                     Math.min(
@@ -575,58 +651,6 @@ const BeatDetector = {
 
         this.prevSignal = signal;
         return { isBeat, threshold: this.threshold, bpm: Math.round(this.bpm) };
-    },
-
-    calculateThreshold(samples) {
-        let runningMax = 0.1;
-        const results = [];
-        
-        samples.forEach(val => {
-            runningMax *= CONSTANTS.BEAT_DETECTION.DECAY_RATE;
-            if (val > runningMax) runningMax = val;
-            
-            const threshold = Math.max(
-                runningMax * CONSTANTS.BEAT_DETECTION.THRESHOLD_MULTIPLIER,
-                CONSTANTS.BEAT_DETECTION.BASE_THRESHOLD
-            );
-            results.push({ threshold, runningMax });
-        });
-        
-        return results;
-    },
-    
-    detectBeats(samples, thresholds) {
-        const beatIndices = [];
-        let lastBeatIndex = -1000;
-
-        for (let i = 1; i < samples.length; i++) {
-            const { runningMax } = thresholds[i];
-            const prevThreshold = thresholds[i - 1].threshold;
-            const val = samples[i];
-            const prevVal = samples[i - 1];
-
-            // Same logic as process(): fire when previous sample was above threshold
-            // and signal is now declining. Handles narrow single-sample peaks.
-            if (BeatDetector.isPeak(prevVal, val, prevThreshold, runningMax) &&
-                (i - lastBeatIndex) > CONSTANTS.BEAT_DETECTION.MIN_GAP_SAMPLES) {
-                beatIndices.push(i - 1); // mark at the peak sample
-                lastBeatIndex = i - 1;
-            }
-        }
-
-        return beatIndices;
-    },
-    
-    calculateBPM(beatIndices, timestamps, windowSize) {
-        if (beatIndices.length < 2 || !timestamps) return null;
-        
-        const recent = beatIndices.slice(-windowSize);
-        if (recent.length < 2) return null;
-        
-        const timeSpan = timestamps[recent[recent.length - 1]] - timestamps[recent[0]];
-        if (timeSpan <= 0) return null;
-        
-        return Math.round(60 * (recent.length - 1) / timeSpan);
     }
 };
 
@@ -895,7 +919,6 @@ async function setMode(newMode) {
         
     } else if (newMode === 'simulate') {
         AppState.clearHistory();
-        AppState.simPhase = 0;
         SignalProcessor.reset();
         BeatDetector.reset();
         BandpassFilter.reset();
@@ -1109,8 +1132,10 @@ function openReview(recording) {
 // ============================================================================
 async function loop(timestamp) {
     if (!AppState.lastTime) AppState.lastTime = timestamp;
-    
-    const dt = (timestamp - AppState.lastTime) / 1000;
+
+    // Clamp dt so a long rAF gap (tab switch, GC pause) cannot inject a huge
+    // time step into the recorded history or the simulation.
+    const dt = Math.min((timestamp - AppState.lastTime) / 1000, 0.1);
     AppState.lastTime = timestamp;
 
     if (AppState.mode === 'camera' || AppState.mode === 'simulate') {
@@ -1127,8 +1152,7 @@ async function loop(timestamp) {
                 isSaturated = result.isSaturated;
                 DOM.saturationWarning.classList.toggle('hidden', !isSaturated);
             } else {
-                AppState.simPhase += dt;
-                signal = SignalProcessor.generateSimulation(AppState.simPhase, AppState.simBpm, AppState.totalTime);
+                signal = SignalProcessor.generateSimulation(dt, AppState.simBpm);
             }
             
             let processedSignal = signal;
