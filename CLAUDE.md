@@ -13,14 +13,17 @@ A standalone, offline-capable Progressive Web App (PWA) for real-time heart rate
 ```
 heart-rate/
 ├── index.html      # Single-page app: HTML structure + all embedded CSS
-├── script.js       # All application logic (~1,055 lines, 8 modules)
+├── script.js       # All application logic (modules listed below)
 ├── sw.js           # Service worker (offline caching, cache-first strategy)
 ├── manifest.json   # PWA manifest (app name, icon, display mode)
 ├── icon.svg        # SVG app icon (heart + ECG waveform)
+├── test/
+│   ├── harness.js    # Loads script.js unmodified into a Node vm sandbox (DOM stubs, seeded RNG)
+│   └── run-tests.js  # Headless regression suite for beat detection + simulation
 └── README.md       # Brief project description
 ```
 
-**No build system, no dependencies, no package.json.** Deploy by serving static files directly.
+**No build system, no dependencies, no package.json.** Deploy by serving static files directly. Tests run with plain Node (`node test/run-tests.js`).
 
 ---
 
@@ -30,29 +33,31 @@ All logic lives in `script.js`, organized into 8 modules using object/closure pa
 
 ### Module Overview
 
-| Module | Lines | Responsibility |
-|--------|-------|----------------|
-| `CONSTANTS` | 1–86 | Immutable configuration for signal processing, beat detection, storage limits |
-| `Config` | ~87–170 | Persistent user settings (localStorage-backed), defaults and load/save |
-| `Camera` | 170–223 | getUserMedia, torch/flashlight, rear camera, stream cleanup |
-| `WakeLock` | 228–251 | Screen wake lock acquisition/release |
-| `SignalProcessor` | 256–330 | PPG signal extraction, adaptive normalization, simulation generation |
-| `BeatDetector` | 335–447 | Real-time and offline beat detection, BPM calculation |
-| `Renderer` | 452–524 | Canvas waveform drawing, beat markers, threshold line, time markers |
-| `Storage` | 529–604 | localStorage CRUD, quota management, export |
-| `UI` + Event Handlers | 609–948 | Tab switching, mode management, animation loop |
+| Module | Responsibility |
+|--------|----------------|
+| `CONSTANTS` | Immutable configuration for signal processing, beat detection, simulation, storage limits |
+| `Config` | Persistent user settings (localStorage-backed), defaults and load/save |
+| `Camera` | getUserMedia, torch/flashlight, rear camera, stream cleanup |
+| `WakeLock` | Screen wake lock acquisition/release |
+| `SignalProcessor` | PPG signal extraction, adaptive normalization, demo-mode simulation |
+| `BandpassFilter` | First-order high-pass + low-pass (used when FFT mode is enabled) |
+| `FFTAnalyzer` / `fftMagnitude` | Frequency-domain BPM estimate (optional, Settings toggle) |
+| `BeatDetector` | Real-time beat detection and BPM calculation (also replayed for review mode) |
+| `Renderer` | Canvas waveform drawing, beat markers, threshold line, time markers |
+| `Storage` | localStorage CRUD, quota management, export |
+| `UI` + Event Handlers | Tab switching, mode management, animation loop |
 
 ### Application Modes
 
 ```
 idle  →  camera  (tap canvas, real camera)
-idle  →  simulate  (Settings: Demo toggle)
+idle  →  simulate  (Settings: Simulate button)
 camera/simulate  →  idle  (tap canvas again, or auto-stop)
 idle  →  review  (tap a history entry)
-review  →  idle  (tap canvas or close)
+review  →  idle  (tap canvas or Done)
 ```
 
-Mode transitions are managed by `AppState.mode` and the functions `startCamera()`, `startSimulation()`, `stopRecording()`, `startReview()`.
+Mode transitions are managed by `AppState.mode` via `setMode()`; review mode is entered through `openReview()`.
 
 ---
 
@@ -66,37 +71,39 @@ Mode transitions are managed by `AppState.mode` and the functions `startCamera()
 
 ### Beat Detection (`BeatDetector`)
 
-- Maintains a **running maximum** with 0.99 decay per sample
-- **Dynamic threshold** = 50% of running max (minimum baseline enforced)
-- **Refractory period** = 250–1000ms (adapts to detected BPM to reject noise)
-- **BPM** = calculated from last N inter-beat intervals (default window: 8 beats), smoothed with factor 0.7
-- Offline analysis (`detectBeats()`) used for reviewing saved recordings
+- Maintains a **running maximum** with time-based decay (`DECAY_PER_SECOND`, ≈0.99/frame at 30fps) so the threshold behaves the same at 15/30/60fps
+- **Dynamic threshold** = 45% of running max (minimum baseline enforced)
+- **Refractory period** = 200–1000ms, adapting to `REFRACTORY_FACTOR` (0.45) × current beat interval. **The factor must stay < 0.5**: at ≥ 0.5, a sudden heart-rate rise (e.g. 75 → 200 BPM) makes every other beat land inside the refractory window and the detector locks permanently onto half the real rate. This is covered by a regression test.
+- **BPM** = trimmed mean (drop top/bottom quarter) of the last N inter-beat intervals (default window: 8 beats), smoothed with factor 0.7. The trimming makes a missed beat (2× interval) or stray double-detection (0.5× interval) unable to drag the displayed BPM.
+- Review mode replays saved samples through the same `BeatDetector.process()` used live, so review and live output are identical.
 
-### Simulation (`generateSimulation()`)
+### Simulation (`generateSimulation(dt, targetBpm)`)
 
-Generates a synthetic PPG/ECG-like signal using Gaussian waveforms:
-- QRS complex (sharp peak)
-- P-wave (smaller preceding peak)
-- Additive noise for realism
+Generates a synthetic PPG-like signal with real-world imperfections (constants in `CONSTANTS.SIMULATION`):
+- Gaussian QRS-like main peak + smaller dicrotic-like secondary wave
+- **Heart-rate variability**: each beat's duration jitters ±4%; slider changes apply at beat boundaries (no phase jump)
+- **Per-beat amplitude variation** (±15%), **white noise**, **slow baseline wander** (~0.25 Hz respiratory drift), and rare **motion-artifact spikes**
+
+This makes demo mode a realistic stress test of the detector; the test suite asserts the detector reads back whatever BPM the slider is set to.
 
 ---
 
 ## Data Storage
 
 - **API:** `localStorage`
-- **Record format:**
+- **Record format** (`v` must equal `CONSTANTS.VERSION`, currently 4; `duration` and sample `t` are in seconds):
   ```json
   {
-    "id": "<timestamp>",
-    "v": 2,
-    "timestamp": 1234567890,
-    "duration": 60000,
+    "id": 1234567890123,
+    "v": 4,
+    "timestamp": "2026-01-01T10:00:00.000Z",
+    "duration": 60.0,
     "avgBpm": 72,
     "samples": [{ "t": 0, "v": 0.3 }, ...]
   }
   ```
 - **Version field (`v`):** Records with wrong version are filtered out on load
-- **Max records:** Configurable (`CONSTANTS.MAX_RECORDS`)
+- **Max records:** Configurable (`Config.maxRecords`, Settings tab)
 - **Max storage:** 5 MB quota; triggers oldest-batch deletion at 95% usage
 - **Export:** JSON blob download via `Storage.exportAll()`
 
@@ -104,7 +111,7 @@ Generates a synthetic PPG/ECG-like signal using Gaussian waveforms:
 
 ## Service Worker (`sw.js`)
 
-- **Cache name:** `pulse-v2` (increment version string to force cache refresh)
+- **Cache name:** `CACHE_NAME` in `sw.js` (increment version string to force cache refresh). `APP_CACHE` in `script.js` must be kept in sync — it drives the version display in Settings.
 - **Cached assets:** `./`, `./index.html`, `./script.js`, `./manifest.json`, `./icon.svg`
 - **Strategy:** Cache-first, network fallback
 - **Activation:** `skipWaiting()` + deletes previous cache versions
@@ -158,18 +165,37 @@ Then open `http://localhost:8080` in a mobile browser or desktop Chrome with Dev
 ### Camera Testing on Desktop
 
 - Use Chrome DevTools → More tools → Sensors to simulate, or
-- Use the built-in **Demo mode** (Settings tab → toggle Demo) which runs `generateSimulation()` instead of the camera
+- Use the built-in **Simulate mode** (Settings tab → Simulate button + Target BPM slider) which runs `generateSimulation()` instead of the camera
 
 ### Making Changes
 
 1. Edit `index.html` (HTML structure or CSS) or `script.js` (logic)
-2. If you add new cached assets, update the `urlsToCache` array in `sw.js`
-3. If the record data format changes, increment `STORAGE_VERSION` in `CONSTANTS` and update the record format documentation above
-4. If cache-busting is needed, increment `CACHE_NAME` in `sw.js`
+2. If you add new cached assets, update the `ASSETS` array in `sw.js`
+3. If the record data format changes, increment `CONSTANTS.VERSION` and update the record format documentation above
+4. If cache-busting is needed, increment `CACHE_NAME` in `sw.js` (and `APP_CACHE` in `script.js`)
+5. Run `node test/run-tests.js` and keep it green
 
-### No Tests
+### Automated Tests
 
-There is no automated test suite. Verify changes manually in browser. Key scenarios to check:
+```bash
+node test/run-tests.js                 # test ./script.js (exit code 0 = green)
+node test/run-tests.js /path/to/old.js # run the same suite against another version
+```
+
+The suite loads the **real, unmodified `script.js`** into a Node `vm` sandbox (`test/harness.js` stubs the DOM and seeds `Math.random`, so runs are deterministic) and drives synthetic PPG signals through the same `SignalProcessor.normalize → BeatDetector.process` path the browser uses. Coverage:
+
+- Steady-rate accuracy 50–240 BPM at 15/30/60fps
+- **Regression: sudden 70 → 200 BPM rise** (field-reported half-rate lock; must recover within 20s)
+- Gradual ramps, sudden drops, heavy noise at 200 BPM, dicrotic-notch double-count rejection
+- Demo-mode pipeline: simulated signal at the slider BPM must read back within tolerance
+- Simulation realism: noise present, reproducible by seed, HRV jitter in range
+- FFT mode estimate at 200 BPM
+
+When changing detector or simulation constants, add/adjust a scenario rather than hand-tuning blind.
+
+### Manual Verification
+
+Still verify in a browser what the harness cannot cover:
 - Camera start/stop (requires physical device or emulation)
 - Beat detection accuracy (compare BPM readout against known pulse)
 - Recording save/load/delete/export
@@ -179,18 +205,20 @@ There is no automated test suite. Verify changes manually in browser. Key scenar
 
 ---
 
-## Important Constants (in `CONSTANTS`, `script.js:1-86`)
+## Important Constants (in `CONSTANTS` at the top of `script.js`)
 
 | Constant | Purpose |
 |----------|---------|
-| `WARMUP_FRAMES` | Frames to discard on camera start for sensor stabilization |
-| `NORM_WINDOW` | Normalization sliding window size (frames) |
-| `REFRACTORY_MIN/MAX` | Beat detector lockout range (ms) |
-| `BPM_WINDOW` | Number of inter-beat intervals for BPM smoothing |
-| `BPM_SMOOTHING` | Exponential smoothing factor for BPM display |
-| `MAX_RECORDS` | Maximum saved recordings in localStorage |
-| `STORAGE_QUOTA_CRITICAL` | localStorage usage fraction triggering auto-deletion |
-| `STORAGE_VERSION` | Record format version; increment on schema changes |
+| `SIGNAL.WARMUP_FRAMES` | Frames to discard on camera start for sensor stabilization |
+| `SIGNAL.NORMALIZATION_WINDOW` | Normalization sliding window size (frames) |
+| `BEAT_DETECTION.DECAY_PER_SECOND` | Time-based running-max decay (frame-rate independent) |
+| `BEAT_DETECTION.REFRACTORY_MIN/MAX_MS` | Beat detector lockout range (ms) |
+| `BEAT_DETECTION.REFRACTORY_FACTOR` | Refractory as fraction of beat interval — **must stay < 0.5** (see Beat Detection) |
+| `BPM.DEFAULT_WINDOW` | Number of beats used for the trimmed-mean BPM |
+| `BPM.SMOOTHING` | Exponential smoothing factor for BPM display |
+| `SIMULATION.HRV_JITTER` etc. | Demo-mode realism: HRV, amplitude jitter, noise, wander, artifacts |
+| `STORAGE.QUOTA_CRITICAL` | localStorage usage fraction triggering auto-deletion |
+| `VERSION` | Record format version; increment on schema changes |
 
 ---
 
