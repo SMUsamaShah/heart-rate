@@ -89,7 +89,7 @@ const CONSTANTS = {
 };
 
 // Must match CACHE_NAME in sw.js — used for the version display in Settings.
-const APP_CACHE = 'pulse-v9';
+const APP_CACHE = 'pulse-v10';
 
 const Config = {
     showPreview: true,
@@ -173,7 +173,7 @@ const DOM = {
 const ppgCtx = DOM.ppgCanvas.getContext('2d', { alpha: false });
 const previewCtx = DOM.previewCanvas.getContext('2d', { willReadFrequently: true });
 
-let animationFrameId;
+let animationFrameId = null;
 
 // ============================================================================
 // APP STATE
@@ -183,20 +183,30 @@ const AppState = {
     totalTime: 0,
     lastTime: null,
     simBpm: CONSTANTS.SIMULATION.DEFAULT_BPM,
-    history: [],
+    history: [],          // trimmed display buffer (last HISTORY_SECONDS only)
+    recording: [],        // full-resolution capture buffer — what gets saved
+    savedCurrent: false,  // true once the current capture has been persisted
     reviewData: null,
     reviewOffset: 0,
-    
+
     addHistoryPoint(time, val, threshold, isBeat, bpm) {
-        this.history.push({ time, val, threshold, beat: isBeat, bpm });
+        // One shared point object goes into both buffers: the display buffer is
+        // trimmed to a sliding window, but the recording buffer keeps every
+        // sample so saved recordings aren't silently truncated to what's on
+        // screen.
+        const point = { time, val, threshold, beat: isBeat, bpm };
+        this.history.push(point);
         const cutoff = time - CONSTANTS.DISPLAY.HISTORY_SECONDS;
         while (this.history.length > 1 && this.history[0].time < cutoff) {
             this.history.shift();
         }
+        this.recording.push(point);
     },
-    
+
     clearHistory() {
         this.history = [];
+        this.recording = [];
+        this.savedCurrent = false;
         this.totalTime = 0;
         this.lastTime = null;
     }
@@ -751,7 +761,23 @@ const Storage = {
             records.unshift(recording);
         }
 
-        localStorage.setItem(CONSTANTS.STORAGE.KEY, JSON.stringify(records));
+        // localStorage has its own ~5MB cap, independent of the Storage API
+        // quota that checkQuota() inspects, so setItem can still throw
+        // QuotaExceededError. Evict oldest records (kept newest-first) until the
+        // write fits rather than silently losing the new recording.
+        while (true) {
+            try {
+                localStorage.setItem(CONSTANTS.STORAGE.KEY, JSON.stringify(records));
+                return true;
+            } catch (e) {
+                if (records.length > 1) {
+                    records.pop();
+                    continue;
+                }
+                alert("Storage full — couldn't save recording. Delete old recordings and try again.");
+                return false;
+            }
+        }
     },
     
     loadAll() {
@@ -860,7 +886,9 @@ const UI = {
     
     updateButtonsForMode(mode) {
         DOM.simulateBtn.innerText = mode === 'simulate' ? 'Stop' : 'Simulate';
-        const canSave = mode === 'idle' && AppState.history.length > 0;
+        // Only offer Save for an un-saved real capture; once auto-saved or saved
+        // the button hides so a stray tap can't persist a duplicate.
+        const canSave = mode === 'idle' && AppState.recording.length > 0 && !AppState.savedCurrent;
         DOM.saveBtn.classList.toggle('hidden', !canSave);
     }
 };
@@ -868,26 +896,42 @@ const UI = {
 // ============================================================================
 // MODE MANAGEMENT
 // ============================================================================
+// Guards against re-entrant transitions: a tap that arrives while an async
+// transition (e.g. camera startup) is still in flight is ignored, so a
+// half-started camera stream can't be orphaned with its torch left on.
+let modeTransitioning = false;
 async function setMode(newMode) {
     if (AppState.mode === newMode) return;
-    
-    // AUTO-SAVE: only real camera recordings — never save simulation data
-    if (AppState.mode === 'camera' && newMode === 'idle') {
-        if (Config.autoSave && AppState.history.length > 0) {
-            saveRecording();
-        }
+    if (modeTransitioning) return;
+    modeTransitioning = true;
+    try {
+        await applyMode(newMode);
+    } finally {
+        modeTransitioning = false;
     }
-    // Discard simulation history before mode changes so the save button
-    // never appears and manual saving is also prevented.
-    if (AppState.mode === 'simulate' && newMode === 'idle') {
+}
+
+async function applyMode(newMode) {
+    const oldMode = AppState.mode;
+
+    // Auto-save whenever we LEAVE camera mode — explicit stop, tab-switch, or
+    // tapping a saved recording — so a live recording is never lost. Keyed on
+    // the mode being left (not the destination) and only on real captures, so
+    // simulation data is never persisted.
+    if (oldMode === 'camera' && Config.autoSave && AppState.recording.length > 0) {
+        await saveRecording();
+    }
+    // Discard simulation data on any change out of simulate mode so it can
+    // never reach the save path.
+    if (oldMode === 'simulate') {
         AppState.clearHistory();
     }
-    
-    if (AppState.mode === 'camera') {
+
+    if (oldMode === 'camera') {
         Camera.stop();
         await WakeLock.release();
     }
-    
+
     AppState.mode = newMode;
     
     if (newMode === 'idle') {
@@ -941,9 +985,9 @@ async function setMode(newMode) {
 // ACTIONS
 // ============================================================================
 async function saveRecording() {
-    if (AppState.history.length === 0) return;
-    
-    if (AppState.history.length < CONSTANTS.STORAGE.MIN_SAVE_LENGTH) {
+    if (AppState.savedCurrent || AppState.recording.length === 0) return;
+
+    if (AppState.recording.length < CONSTANTS.STORAGE.MIN_SAVE_LENGTH) {
         if (!Config.autoSave) {
             alert("Too short to save (minimum 1 second)");
         }
@@ -951,19 +995,21 @@ async function saveRecording() {
     }
 
     if (!(await Storage.checkQuota())) return;
-    
+
     const recording = {
         id: Date.now(),
         v: CONSTANTS.VERSION,
         timestamp: new Date().toISOString(),
         duration: AppState.totalTime,
         avgBpm: Math.round(BeatDetector.bpm) || 0,
-        samples: AppState.history.map(h => ({ t: h.time, v: h.val }))
+        samples: AppState.recording.map(h => ({ t: h.time, v: h.val }))
     };
-    
-    await Storage.save(recording);
+
+    if (!(await Storage.save(recording))) return;
+    AppState.savedCurrent = true;
+    UI.updateButtonsForMode(AppState.mode);
     renderRecordingsList();
-    
+
     if (!Config.autoSave) {
         alert(`Saved! BPM: ${recording.avgBpm || 'N/A'}, Duration: ${AppState.totalTime.toFixed(1)}s`);
     }
@@ -1069,8 +1115,10 @@ function renderRecordingsList() {
     });
 }
 
-function openReview(recording) {
-    setMode('review');
+async function openReview(recording) {
+    // Await the transition so an in-flight camera auto-save reads the live
+    // BeatDetector.bpm before the replay below resets the detector.
+    await setMode('review');
 
     // Replay the stored signal through the exact same pipeline as live mode
     // so that beat markers and BPM values are identical to what was shown live.
@@ -1254,14 +1302,16 @@ DOM.settingMaxRecords.oninput = saveSettings;
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         cancelAnimationFrame(animationFrameId);
-        if (AppState.mode === 'camera') {
-            Camera.stop();
-            WakeLock.release();
-            AppState.mode = 'idle';
-            DOM.modeBadge.innerText = "PAUSED";
-            UI.updateButtonsForMode('idle');
+        animationFrameId = null;
+        // Route through setMode so a recording in progress is auto-saved and
+        // torn down exactly as an explicit stop would be.
+        if (AppState.mode === 'camera' || AppState.mode === 'simulate') {
+            setMode('idle');
         }
-    } else {
+    } else if (!animationFrameId) {
+        // Only start a loop if one isn't already queued: a frame queued before
+        // the tab was hidden is merely paused, and starting a second here would
+        // run two loops at once.
         loop(performance.now());
     }
 });
@@ -1302,7 +1352,10 @@ document.getElementById('canvasContainer').addEventListener('touchstart', e => {
     handleCanvasTap();
 }, { passive: false });
 
-document.getElementById('canvasContainer').addEventListener('click', handleCanvasTap);
+document.getElementById('canvasContainer').addEventListener('click', e => {
+    if (e.target.closest('button')) return;
+    handleCanvasTap();
+});
 
 // ============================================================================
 // INITIALIZATION

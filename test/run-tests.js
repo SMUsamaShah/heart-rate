@@ -277,6 +277,38 @@ if (hasNewSim) {
     }
 }
 
+section('Recording buffer keeps the full capture (not just the display window)');
+{
+    // Regression for the "recordings truncated to the last 20s" bug: the
+    // display buffer (history) is windowed, but the recording buffer that
+    // saveRecording() reads from must retain every sample.
+    const app = loadApp(SCRIPT);
+    app.AppState.clearHistory();
+    const fps = 30, durationS = 45;
+    for (let i = 0; i <= fps * durationS; i++) {
+        const t = i / fps;
+        app.AppState.totalTime = t;
+        app.AppState.addHistoryPoint(t, 0.1, 0.05, false, 70);
+    }
+    const hist = app.AppState.history;
+    const rec = app.AppState.recording;
+    const histSpan = hist[hist.length - 1].time - hist[0].time;
+    check('display buffer is windowed to ~HISTORY_SECONDS',
+        histSpan <= app.CONSTANTS.DISPLAY.HISTORY_SECONDS + 1,
+        `display span ${histSpan.toFixed(1)}s`);
+    // Older versions lacked a separate recording buffer (the truncation bug);
+    // fail cleanly rather than crashing when run against them.
+    if (!Array.isArray(rec)) {
+        check('recording buffer retains the full duration from t=0', false,
+            'AppState.recording buffer is missing — saves are truncated to the display window');
+    } else {
+        const recSpan = rec[rec.length - 1].time - rec[0].time;
+        check('recording buffer retains the full duration from t=0',
+            rec[0].time === 0 && recSpan >= durationS - 1,
+            `recording span ${recSpan.toFixed(1)}s from t=${rec[0].time}`);
+    }
+}
+
 section('FFT mode at 200 BPM');
 {
     const app = loadApp(SCRIPT, 1200);
