@@ -95,27 +95,38 @@ isn't already queued.
 
 ---
 
-## Low severity — Open (documented, not fixed)
+## Low severity — Fixed
 
-- **BPM window of 1 bricks the BPM display.** The number field's `min="2"` isn't
-  enforced for typed values and `parseInt(...) || 8` only rejects `0`/NaN, so `1`
-  passes through; `detectedBeats` is capped at one entry and the `>= 2` branch
-  never runs (BPM stuck at 0).
-- **FFT mode shows junk BPM with no signal.** `computeBPM` has no peak-magnitude
-  floor: a flat buffer returns 35 BPM and pure noise returned 186 in testing,
-  displayed before a finger touches the lens. Review also replays only the
-  threshold detector, so reviewed BPM ≠ live BPM for FFT-mode recordings.
-- **Typing in any settings number field resets the beat detector mid-recording**
-  via `oninput → saveSettings → BeatDetector.reset()`, including for Max Records,
-  which doesn't affect detection.
-- **`avgBpm` is not an average** — it's the final smoothed BPM at stop time, but
-  the history list labels it "Avg BPM".
-- **"Minimum 1 second" is wrong.** `MIN_SAVE_LENGTH: 60` counts frames, so the
-  real minimum is 2 s at 30 fps and 4 s at 15 fps (torch mode).
-- **Cosmetics:** negative time-axis labels render at capture start; `getStats`
-  treats `exposureCompensation: 0` as falsy; `frameRate: { min: 30 }` is a hard
-  constraint that can make `getUserMedia` fail on cameras that won't guarantee
-  30 fps (notable since torch mode often runs ~15 fps).
+- **BPM window of 1 bricked the BPM display.** A typed `1` passed validation
+  (`parseInt(...) || 8` only rejects `0`/NaN), capping `detectedBeats` at one
+  entry so the `>= 2` branch never ran (BPM stuck at 0).
+  **Fix:** `saveSettings` clamps the window to `[2, 50]`, and `BeatDetector.process`
+  clamps `bpmWindow` to `>= 2` defensively so a stale persisted `1` can't brick it.
+- **FFT mode showed junk BPM with no signal.** `computeBPM` had no peak floor: a
+  flat buffer returned 35 BPM and pure noise 186, shown before a finger touched
+  the lens; review also replayed only the threshold detector.
+  **Fix:** a peak-to-mean ratio gate (`FFT.MIN_PEAK_RATIO`, measured >9 for real
+  signals vs <2 for noise) returns 0 when no real pulse is present, and the review
+  replay now mirrors the live `displayBpm` (FFT estimate when active).
+- **Typing in any settings number field reset the beat detector mid-recording**
+  via `oninput → saveSettings → BeatDetector.reset()`.
+  **Fix:** removed the reset from `saveSettings`; a window change is absorbed by
+  `BeatDetector.process` and no other setting needs it.
+- **`avgBpm` was not an average** — it stored the final smoothed BPM but the list
+  labels it "Avg BPM".
+  **Fix:** compute a true mean of the per-frame BPM across the capture.
+- **"Minimum 1 second" was wrong.** `MIN_SAVE_LENGTH: 60` counted frames (2 s at
+  30 fps, 4 s at 15 fps).
+  **Fix:** the threshold is now time-based (`MIN_SAVE_SECONDS`, compared against
+  `totalTime`).
+- **Cosmetics.** **Fix:** negative time-axis labels are skipped before `t = 0`;
+  `getStats` uses `??` so `exposureCompensation: 0` is shown; the mandatory
+  `frameRate: { min: 30 }` constraint was relaxed to `{ ideal: 60 }` so
+  `getUserMedia` doesn't fail on cameras that won't guarantee 30 fps.
+
+One deeper item is intentionally **not** changed: with FFT mode off, `avgBpm` and
+the live readout still come from the threshold detector — the FFT path remains an
+opt-in Settings toggle.
 
 ---
 
@@ -123,5 +134,7 @@ isn't already queued.
 
 Findings 2–8 and the low-severity items were reproduced empirically against the
 unmodified `script.js` via the test harness; finding 1 is confirmed by code trace
-and the history of commit `f457343`. A regression test for finding 2 (recording
-buffer retains the full capture) was added to `test/run-tests.js`.
+and the history of commit `f457343`. Regression tests were added to
+`test/run-tests.js` for finding 2 (recording buffer retains the full capture),
+the FFT signal-quality gate (flat/noise report no BPM), and the BPM-window clamp;
+the suite is green at 50 checks.

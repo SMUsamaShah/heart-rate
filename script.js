@@ -62,7 +62,7 @@ const CONSTANTS = {
         KEY: 'hr_records',
         SETTINGS_KEY: 'pulse_settings',
         QUOTA_CRITICAL: 0.95,
-        MIN_SAVE_LENGTH: 60,
+        MIN_SAVE_SECONDS: 1,
         DELETE_BATCH_SIZE: 10,
         MAX_STORAGE_MB: 5
     },
@@ -79,7 +79,10 @@ const CONSTANTS = {
     FFT: {
         BUFFER_SIZE: 256,
         MIN_BPM: 30,
-        MAX_BPM: 240
+        MAX_BPM: 240,
+        // Minimum spectral peak-to-mean ratio for the FFT estimate to be
+        // trusted. Finger-on signals measure >9; noise / no-finger frames <2.
+        MIN_PEAK_RATIO: 4
     },
 
     DISPLAY: {
@@ -89,7 +92,7 @@ const CONSTANTS = {
 };
 
 // Must match CACHE_NAME in sw.js — used for the version display in Settings.
-const APP_CACHE = 'pulse-v10';
+const APP_CACHE = 'pulse-v11';
 
 const Config = {
     showPreview: true,
@@ -226,7 +229,7 @@ const Camera = {
                     facingMode: 'environment',
                     width: { ideal: 320 },
                     height: { ideal: 240 },
-                    frameRate: { ideal: 60, min: 30 }
+                    frameRate: { ideal: 60 }
                 }
             });
             
@@ -257,7 +260,7 @@ const Camera = {
         return {
             resolution: `${s.width}x${s.height}`,
             fps: s.frameRate ? s.frameRate.toFixed(1) : '--',
-            exposure: s.exposureCompensation || s.exposureMode || '--',
+            exposure: s.exposureCompensation ?? s.exposureMode ?? '--',
             iso: s.iso || '--'
         };
     },
@@ -544,10 +547,18 @@ const FFTAnalyzer = {
         const minBin = Math.ceil(CONSTANTS.FFT.MIN_BPM / 60 * N / sampleRate);
         const maxBin = Math.min(Math.floor(CONSTANTS.FFT.MAX_BPM / 60 * N / sampleRate), (N >> 1) - 1);
 
-        let peakBin = minBin, peakMag = 0;
+        let peakBin = minBin, peakMag = 0, bandSum = 0;
         for (let i = minBin; i <= maxBin; i++) {
+            bandSum += mags[i];
             if (mags[i] > peakMag) { peakMag = mags[i]; peakBin = i; }
         }
+
+        // Signal-quality gate: a real pulse puts the spectral peak far above the
+        // in-band average (measured ratio >9 for finger-on signals, <2 for noise
+        // or a flat no-finger frame). Below the floor there's no pulse, so report
+        // 0 rather than a phantom BPM.
+        const meanMag = bandSum / (maxBin - minBin + 1);
+        if (peakMag <= 0 || peakMag < meanMag * CONSTANTS.FFT.MIN_PEAK_RATIO) return 0;
 
         // Parabolic interpolation for sub-bin frequency accuracy
         let trueBin = peakBin;
@@ -613,6 +624,11 @@ const BeatDetector = {
     },
 
     process(signal, timestamp, bpmWindow) {
+        // A window < 2 can never form an inter-beat interval, which would peg
+        // the BPM at 0; clamp regardless of the configured/persisted value so a
+        // stale setting from before validation can't brick the readout.
+        bpmWindow = Math.max(2, bpmWindow || CONSTANTS.BPM.DEFAULT_WINDOW);
+
         // Time-based decay so the adaptive threshold behaves the same
         // regardless of camera frame rate (torch mode often halves it).
         const dtMs = this.lastSampleTime === null ? 33 :
@@ -686,6 +702,7 @@ const Renderer = {
         ppgCtx.strokeStyle = 'rgba(255,255,255,0.15)';
         ppgCtx.fillStyle = 'rgba(255,255,255,0.3)';
         for (let s = Math.ceil(windowStart); s <= Math.floor(latestTime); s++) {
+            if (s < 0) continue; // no gridlines/labels before the recording starts
             const x = (s - windowStart) * pps;
             ppgCtx.beginPath();
             ppgCtx.moveTo(x, 0);
@@ -987,7 +1004,7 @@ async function applyMode(newMode) {
 async function saveRecording() {
     if (AppState.savedCurrent || AppState.recording.length === 0) return;
 
-    if (AppState.recording.length < CONSTANTS.STORAGE.MIN_SAVE_LENGTH) {
+    if (AppState.totalTime < CONSTANTS.STORAGE.MIN_SAVE_SECONDS) {
         if (!Config.autoSave) {
             alert("Too short to save (minimum 1 second)");
         }
@@ -996,12 +1013,18 @@ async function saveRecording() {
 
     if (!(await Storage.checkQuota())) return;
 
+    // avgBpm is a true mean of the per-frame BPM across the whole capture (the
+    // history list labels it "Avg BPM"), not just the final smoothed reading.
+    const bpms = AppState.recording.map(h => h.bpm).filter(b => b > 0);
+    const avgBpm = bpms.length
+        ? Math.round(bpms.reduce((a, b) => a + b, 0) / bpms.length) : 0;
+
     const recording = {
         id: Date.now(),
         v: CONSTANTS.VERSION,
         timestamp: new Date().toISOString(),
         duration: AppState.totalTime,
-        avgBpm: Math.round(BeatDetector.bpm) || 0,
+        avgBpm,
         samples: AppState.recording.map(h => ({ t: h.time, v: h.val }))
     };
 
@@ -1042,13 +1065,19 @@ function exportAllData() {
 function saveSettings() {
     Config.showPreview = DOM.settingPreview.checked;
     Config.autoStopSeconds = parseInt(DOM.settingAutoStop.value) || 0;
-    Config.bpmCalculationWindow = parseInt(DOM.settingBpmWindow.value) || CONSTANTS.BPM.DEFAULT_WINDOW;
+    // Clamp to >= 2: a window of 1 keeps only a single beat, so no inter-beat
+    // interval is ever formed and the BPM readout sticks at 0.
+    const win = parseInt(DOM.settingBpmWindow.value);
+    Config.bpmCalculationWindow = Number.isFinite(win)
+        ? Math.max(2, Math.min(50, win)) : CONSTANTS.BPM.DEFAULT_WINDOW;
     Config.maxRecords = parseInt(DOM.settingMaxRecords.value) || 0;
     Config.autoSave = DOM.settingAutoSave.checked;
-    
+
     Config.save();
     DOM.previewCanvas.classList.toggle('hidden', !Config.showPreview);
-    BeatDetector.reset();
+    // Intentionally no BeatDetector.reset() here: it ran on every keystroke
+    // (oninput) and blanked the live BPM mid-recording. A BPM-window change is
+    // absorbed by BeatDetector.process() on its own; no other setting needs it.
 }
 
 function loadSettings() {
@@ -1136,10 +1165,12 @@ async function openReview(recording) {
         const timestampMs = sample.t * 1000;
 
         let processedSignal = sample.v;
+        let fftBpm = 0;
         if (Config.useFFT) {
             const dt = prevSample ? (sample.t - prevSample.t) : (1 / 30);
             processedSignal = BandpassFilter.process(sample.v, dt);
             FFTAnalyzer.addSample(processedSignal, timestampMs);
+            fftBpm = FFTAnalyzer.computeBPM();
         }
 
         const result = BeatDetector.process(processedSignal, timestampMs, Config.bpmCalculationWindow);
@@ -1149,7 +1180,9 @@ async function openReview(recording) {
             val: sample.v,
             threshold: result.threshold,
             beat: false,
-            bpm: result.bpm
+            // Mirror the live displayBpm so review matches what was shown live,
+            // including FFT mode (otherwise review showed the threshold BPM).
+            bpm: fftBpm > 0 ? fftBpm : result.bpm
         });
 
         // Same retroactive peak-marking as live mode: the beat fires on the
@@ -1303,9 +1336,11 @@ document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         cancelAnimationFrame(animationFrameId);
         animationFrameId = null;
-        // Route through setMode so a recording in progress is auto-saved and
-        // torn down exactly as an explicit stop would be.
-        if (AppState.mode === 'camera' || AppState.mode === 'simulate') {
+        // Route camera teardown through setMode so an in-progress recording is
+        // auto-saved and the hardware/torch released exactly as an explicit stop
+        // would be. Simulate just pauses with the cancelled frame and resumes on
+        // return — there's no hardware to free and nothing to save.
+        if (AppState.mode === 'camera') {
             setMode('idle');
         }
     } else if (!animationFrameId) {

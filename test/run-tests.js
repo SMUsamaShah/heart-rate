@@ -329,6 +329,31 @@ section('FFT mode at 200 BPM');
     check('FFT estimate within ±10 BPM of 200', Math.abs(fftBpm - 200) <= 10, `got ${fftBpm}`);
 }
 
+section('FFT signal-quality gate (no phantom BPM without a real pulse)');
+{
+    const app = loadApp(SCRIPT, 1300);
+    const N = app.CONSTANTS.FFT.BUFFER_SIZE;
+
+    app.FFTAnalyzer.reset();
+    for (let i = 0; i < N; i++) app.FFTAnalyzer.addSample(0, i * 33.3);
+    check('flat no-finger frame reports no BPM', app.FFTAnalyzer.computeBPM() === 0,
+        `got ${app.FFTAnalyzer.computeBPM()}`);
+
+    app.FFTAnalyzer.reset();
+    const rng = seededRandom(31);
+    for (let i = 0; i < N; i++) app.FFTAnalyzer.addSample((rng() - 0.5) * 0.02, i * 33.3);
+    check('pure sensor noise reports no BPM', app.FFTAnalyzer.computeBPM() === 0,
+        `got ${app.FFTAnalyzer.computeBPM()}`);
+}
+
+section('BPM window < 2 is clamped, not bricked');
+{
+    const app = loadApp(SCRIPT, 1400);
+    const samples = makePpg({ bpmAt: () => 75, fps: 30, durationS: 30, seed: 75 });
+    const res = runDetector(app, samples, 1); // pathological window from a stale setting
+    checkBpm('reads ~75 BPM even with window=1', tailMeanBpm(res, 10), 75, 0.06);
+}
+
 // ----------------------------------------------------------------------------
 console.log(`\n${passed + failed} checks: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
