@@ -62,7 +62,7 @@ const CONSTANTS = {
         KEY: 'hr_records',
         SETTINGS_KEY: 'pulse_settings',
         QUOTA_CRITICAL: 0.95,
-        MIN_SAVE_LENGTH: 60,
+        MIN_SAVE_SECONDS: 1,
         DELETE_BATCH_SIZE: 10,
         MAX_STORAGE_MB: 5
     },
@@ -79,7 +79,10 @@ const CONSTANTS = {
     FFT: {
         BUFFER_SIZE: 256,
         MIN_BPM: 30,
-        MAX_BPM: 240
+        MAX_BPM: 240,
+        // Minimum spectral peak-to-mean ratio for the FFT estimate to be
+        // trusted. Finger-on signals measure >9; noise / no-finger frames <2.
+        MIN_PEAK_RATIO: 4
     },
 
     DISPLAY: {
@@ -89,7 +92,7 @@ const CONSTANTS = {
 };
 
 // Must match CACHE_NAME in sw.js — used for the version display in Settings.
-const APP_CACHE = 'pulse-v9';
+const APP_CACHE = 'pulse-v11';
 
 const Config = {
     showPreview: true,
@@ -173,7 +176,7 @@ const DOM = {
 const ppgCtx = DOM.ppgCanvas.getContext('2d', { alpha: false });
 const previewCtx = DOM.previewCanvas.getContext('2d', { willReadFrequently: true });
 
-let animationFrameId;
+let animationFrameId = null;
 
 // ============================================================================
 // APP STATE
@@ -183,20 +186,30 @@ const AppState = {
     totalTime: 0,
     lastTime: null,
     simBpm: CONSTANTS.SIMULATION.DEFAULT_BPM,
-    history: [],
+    history: [],          // trimmed display buffer (last HISTORY_SECONDS only)
+    recording: [],        // full-resolution capture buffer — what gets saved
+    savedCurrent: false,  // true once the current capture has been persisted
     reviewData: null,
     reviewOffset: 0,
-    
+
     addHistoryPoint(time, val, threshold, isBeat, bpm) {
-        this.history.push({ time, val, threshold, beat: isBeat, bpm });
+        // One shared point object goes into both buffers: the display buffer is
+        // trimmed to a sliding window, but the recording buffer keeps every
+        // sample so saved recordings aren't silently truncated to what's on
+        // screen.
+        const point = { time, val, threshold, beat: isBeat, bpm };
+        this.history.push(point);
         const cutoff = time - CONSTANTS.DISPLAY.HISTORY_SECONDS;
         while (this.history.length > 1 && this.history[0].time < cutoff) {
             this.history.shift();
         }
+        this.recording.push(point);
     },
-    
+
     clearHistory() {
         this.history = [];
+        this.recording = [];
+        this.savedCurrent = false;
         this.totalTime = 0;
         this.lastTime = null;
     }
@@ -216,7 +229,7 @@ const Camera = {
                     facingMode: 'environment',
                     width: { ideal: 320 },
                     height: { ideal: 240 },
-                    frameRate: { ideal: 60, min: 30 }
+                    frameRate: { ideal: 60 }
                 }
             });
             
@@ -247,7 +260,7 @@ const Camera = {
         return {
             resolution: `${s.width}x${s.height}`,
             fps: s.frameRate ? s.frameRate.toFixed(1) : '--',
-            exposure: s.exposureCompensation || s.exposureMode || '--',
+            exposure: s.exposureCompensation ?? s.exposureMode ?? '--',
             iso: s.iso || '--'
         };
     },
@@ -534,10 +547,18 @@ const FFTAnalyzer = {
         const minBin = Math.ceil(CONSTANTS.FFT.MIN_BPM / 60 * N / sampleRate);
         const maxBin = Math.min(Math.floor(CONSTANTS.FFT.MAX_BPM / 60 * N / sampleRate), (N >> 1) - 1);
 
-        let peakBin = minBin, peakMag = 0;
+        let peakBin = minBin, peakMag = 0, bandSum = 0;
         for (let i = minBin; i <= maxBin; i++) {
+            bandSum += mags[i];
             if (mags[i] > peakMag) { peakMag = mags[i]; peakBin = i; }
         }
+
+        // Signal-quality gate: a real pulse puts the spectral peak far above the
+        // in-band average (measured ratio >9 for finger-on signals, <2 for noise
+        // or a flat no-finger frame). Below the floor there's no pulse, so report
+        // 0 rather than a phantom BPM.
+        const meanMag = bandSum / (maxBin - minBin + 1);
+        if (peakMag <= 0 || peakMag < meanMag * CONSTANTS.FFT.MIN_PEAK_RATIO) return 0;
 
         // Parabolic interpolation for sub-bin frequency accuracy
         let trueBin = peakBin;
@@ -603,6 +624,11 @@ const BeatDetector = {
     },
 
     process(signal, timestamp, bpmWindow) {
+        // A window < 2 can never form an inter-beat interval, which would peg
+        // the BPM at 0; clamp regardless of the configured/persisted value so a
+        // stale setting from before validation can't brick the readout.
+        bpmWindow = Math.max(2, bpmWindow || CONSTANTS.BPM.DEFAULT_WINDOW);
+
         // Time-based decay so the adaptive threshold behaves the same
         // regardless of camera frame rate (torch mode often halves it).
         const dtMs = this.lastSampleTime === null ? 33 :
@@ -676,6 +702,7 @@ const Renderer = {
         ppgCtx.strokeStyle = 'rgba(255,255,255,0.15)';
         ppgCtx.fillStyle = 'rgba(255,255,255,0.3)';
         for (let s = Math.ceil(windowStart); s <= Math.floor(latestTime); s++) {
+            if (s < 0) continue; // no gridlines/labels before the recording starts
             const x = (s - windowStart) * pps;
             ppgCtx.beginPath();
             ppgCtx.moveTo(x, 0);
@@ -751,7 +778,23 @@ const Storage = {
             records.unshift(recording);
         }
 
-        localStorage.setItem(CONSTANTS.STORAGE.KEY, JSON.stringify(records));
+        // localStorage has its own ~5MB cap, independent of the Storage API
+        // quota that checkQuota() inspects, so setItem can still throw
+        // QuotaExceededError. Evict oldest records (kept newest-first) until the
+        // write fits rather than silently losing the new recording.
+        while (true) {
+            try {
+                localStorage.setItem(CONSTANTS.STORAGE.KEY, JSON.stringify(records));
+                return true;
+            } catch (e) {
+                if (records.length > 1) {
+                    records.pop();
+                    continue;
+                }
+                alert("Storage full — couldn't save recording. Delete old recordings and try again.");
+                return false;
+            }
+        }
     },
     
     loadAll() {
@@ -860,7 +903,9 @@ const UI = {
     
     updateButtonsForMode(mode) {
         DOM.simulateBtn.innerText = mode === 'simulate' ? 'Stop' : 'Simulate';
-        const canSave = mode === 'idle' && AppState.history.length > 0;
+        // Only offer Save for an un-saved real capture; once auto-saved or saved
+        // the button hides so a stray tap can't persist a duplicate.
+        const canSave = mode === 'idle' && AppState.recording.length > 0 && !AppState.savedCurrent;
         DOM.saveBtn.classList.toggle('hidden', !canSave);
     }
 };
@@ -868,26 +913,42 @@ const UI = {
 // ============================================================================
 // MODE MANAGEMENT
 // ============================================================================
+// Guards against re-entrant transitions: a tap that arrives while an async
+// transition (e.g. camera startup) is still in flight is ignored, so a
+// half-started camera stream can't be orphaned with its torch left on.
+let modeTransitioning = false;
 async function setMode(newMode) {
     if (AppState.mode === newMode) return;
-    
-    // AUTO-SAVE: only real camera recordings — never save simulation data
-    if (AppState.mode === 'camera' && newMode === 'idle') {
-        if (Config.autoSave && AppState.history.length > 0) {
-            saveRecording();
-        }
+    if (modeTransitioning) return;
+    modeTransitioning = true;
+    try {
+        await applyMode(newMode);
+    } finally {
+        modeTransitioning = false;
     }
-    // Discard simulation history before mode changes so the save button
-    // never appears and manual saving is also prevented.
-    if (AppState.mode === 'simulate' && newMode === 'idle') {
+}
+
+async function applyMode(newMode) {
+    const oldMode = AppState.mode;
+
+    // Auto-save whenever we LEAVE camera mode — explicit stop, tab-switch, or
+    // tapping a saved recording — so a live recording is never lost. Keyed on
+    // the mode being left (not the destination) and only on real captures, so
+    // simulation data is never persisted.
+    if (oldMode === 'camera' && Config.autoSave && AppState.recording.length > 0) {
+        await saveRecording();
+    }
+    // Discard simulation data on any change out of simulate mode so it can
+    // never reach the save path.
+    if (oldMode === 'simulate') {
         AppState.clearHistory();
     }
-    
-    if (AppState.mode === 'camera') {
+
+    if (oldMode === 'camera') {
         Camera.stop();
         await WakeLock.release();
     }
-    
+
     AppState.mode = newMode;
     
     if (newMode === 'idle') {
@@ -941,9 +1002,9 @@ async function setMode(newMode) {
 // ACTIONS
 // ============================================================================
 async function saveRecording() {
-    if (AppState.history.length === 0) return;
-    
-    if (AppState.history.length < CONSTANTS.STORAGE.MIN_SAVE_LENGTH) {
+    if (AppState.savedCurrent || AppState.recording.length === 0) return;
+
+    if (AppState.totalTime < CONSTANTS.STORAGE.MIN_SAVE_SECONDS) {
         if (!Config.autoSave) {
             alert("Too short to save (minimum 1 second)");
         }
@@ -951,19 +1012,27 @@ async function saveRecording() {
     }
 
     if (!(await Storage.checkQuota())) return;
-    
+
+    // avgBpm is a true mean of the per-frame BPM across the whole capture (the
+    // history list labels it "Avg BPM"), not just the final smoothed reading.
+    const bpms = AppState.recording.map(h => h.bpm).filter(b => b > 0);
+    const avgBpm = bpms.length
+        ? Math.round(bpms.reduce((a, b) => a + b, 0) / bpms.length) : 0;
+
     const recording = {
         id: Date.now(),
         v: CONSTANTS.VERSION,
         timestamp: new Date().toISOString(),
         duration: AppState.totalTime,
-        avgBpm: Math.round(BeatDetector.bpm) || 0,
-        samples: AppState.history.map(h => ({ t: h.time, v: h.val }))
+        avgBpm,
+        samples: AppState.recording.map(h => ({ t: h.time, v: h.val }))
     };
-    
-    await Storage.save(recording);
+
+    if (!(await Storage.save(recording))) return;
+    AppState.savedCurrent = true;
+    UI.updateButtonsForMode(AppState.mode);
     renderRecordingsList();
-    
+
     if (!Config.autoSave) {
         alert(`Saved! BPM: ${recording.avgBpm || 'N/A'}, Duration: ${AppState.totalTime.toFixed(1)}s`);
     }
@@ -996,13 +1065,19 @@ function exportAllData() {
 function saveSettings() {
     Config.showPreview = DOM.settingPreview.checked;
     Config.autoStopSeconds = parseInt(DOM.settingAutoStop.value) || 0;
-    Config.bpmCalculationWindow = parseInt(DOM.settingBpmWindow.value) || CONSTANTS.BPM.DEFAULT_WINDOW;
+    // Clamp to >= 2: a window of 1 keeps only a single beat, so no inter-beat
+    // interval is ever formed and the BPM readout sticks at 0.
+    const win = parseInt(DOM.settingBpmWindow.value);
+    Config.bpmCalculationWindow = Number.isFinite(win)
+        ? Math.max(2, Math.min(50, win)) : CONSTANTS.BPM.DEFAULT_WINDOW;
     Config.maxRecords = parseInt(DOM.settingMaxRecords.value) || 0;
     Config.autoSave = DOM.settingAutoSave.checked;
-    
+
     Config.save();
     DOM.previewCanvas.classList.toggle('hidden', !Config.showPreview);
-    BeatDetector.reset();
+    // Intentionally no BeatDetector.reset() here: it ran on every keystroke
+    // (oninput) and blanked the live BPM mid-recording. A BPM-window change is
+    // absorbed by BeatDetector.process() on its own; no other setting needs it.
 }
 
 function loadSettings() {
@@ -1069,8 +1144,10 @@ function renderRecordingsList() {
     });
 }
 
-function openReview(recording) {
-    setMode('review');
+async function openReview(recording) {
+    // Await the transition so an in-flight camera auto-save reads the live
+    // BeatDetector.bpm before the replay below resets the detector.
+    await setMode('review');
 
     // Replay the stored signal through the exact same pipeline as live mode
     // so that beat markers and BPM values are identical to what was shown live.
@@ -1088,10 +1165,12 @@ function openReview(recording) {
         const timestampMs = sample.t * 1000;
 
         let processedSignal = sample.v;
+        let fftBpm = 0;
         if (Config.useFFT) {
             const dt = prevSample ? (sample.t - prevSample.t) : (1 / 30);
             processedSignal = BandpassFilter.process(sample.v, dt);
             FFTAnalyzer.addSample(processedSignal, timestampMs);
+            fftBpm = FFTAnalyzer.computeBPM();
         }
 
         const result = BeatDetector.process(processedSignal, timestampMs, Config.bpmCalculationWindow);
@@ -1101,7 +1180,9 @@ function openReview(recording) {
             val: sample.v,
             threshold: result.threshold,
             beat: false,
-            bpm: result.bpm
+            // Mirror the live displayBpm so review matches what was shown live,
+            // including FFT mode (otherwise review showed the threshold BPM).
+            bpm: fftBpm > 0 ? fftBpm : result.bpm
         });
 
         // Same retroactive peak-marking as live mode: the beat fires on the
@@ -1254,14 +1335,18 @@ DOM.settingMaxRecords.oninput = saveSettings;
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+        // Route camera teardown through setMode so an in-progress recording is
+        // auto-saved and the hardware/torch released exactly as an explicit stop
+        // would be. Simulate just pauses with the cancelled frame and resumes on
+        // return — there's no hardware to free and nothing to save.
         if (AppState.mode === 'camera') {
-            Camera.stop();
-            WakeLock.release();
-            AppState.mode = 'idle';
-            DOM.modeBadge.innerText = "PAUSED";
-            UI.updateButtonsForMode('idle');
+            setMode('idle');
         }
-    } else {
+    } else if (!animationFrameId) {
+        // Only start a loop if one isn't already queued: a frame queued before
+        // the tab was hidden is merely paused, and starting a second here would
+        // run two loops at once.
         loop(performance.now());
     }
 });
@@ -1302,7 +1387,10 @@ document.getElementById('canvasContainer').addEventListener('touchstart', e => {
     handleCanvasTap();
 }, { passive: false });
 
-document.getElementById('canvasContainer').addEventListener('click', handleCanvasTap);
+document.getElementById('canvasContainer').addEventListener('click', e => {
+    if (e.target.closest('button')) return;
+    handleCanvasTap();
+});
 
 // ============================================================================
 // INITIALIZATION

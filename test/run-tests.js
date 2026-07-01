@@ -277,6 +277,38 @@ if (hasNewSim) {
     }
 }
 
+section('Recording buffer keeps the full capture (not just the display window)');
+{
+    // Regression for the "recordings truncated to the last 20s" bug: the
+    // display buffer (history) is windowed, but the recording buffer that
+    // saveRecording() reads from must retain every sample.
+    const app = loadApp(SCRIPT);
+    app.AppState.clearHistory();
+    const fps = 30, durationS = 45;
+    for (let i = 0; i <= fps * durationS; i++) {
+        const t = i / fps;
+        app.AppState.totalTime = t;
+        app.AppState.addHistoryPoint(t, 0.1, 0.05, false, 70);
+    }
+    const hist = app.AppState.history;
+    const rec = app.AppState.recording;
+    const histSpan = hist[hist.length - 1].time - hist[0].time;
+    check('display buffer is windowed to ~HISTORY_SECONDS',
+        histSpan <= app.CONSTANTS.DISPLAY.HISTORY_SECONDS + 1,
+        `display span ${histSpan.toFixed(1)}s`);
+    // Older versions lacked a separate recording buffer (the truncation bug);
+    // fail cleanly rather than crashing when run against them.
+    if (!Array.isArray(rec)) {
+        check('recording buffer retains the full duration from t=0', false,
+            'AppState.recording buffer is missing — saves are truncated to the display window');
+    } else {
+        const recSpan = rec[rec.length - 1].time - rec[0].time;
+        check('recording buffer retains the full duration from t=0',
+            rec[0].time === 0 && recSpan >= durationS - 1,
+            `recording span ${recSpan.toFixed(1)}s from t=${rec[0].time}`);
+    }
+}
+
 section('FFT mode at 200 BPM');
 {
     const app = loadApp(SCRIPT, 1200);
@@ -295,6 +327,31 @@ section('FFT mode at 200 BPM');
     }
     const fftBpm = app.FFTAnalyzer.computeBPM();
     check('FFT estimate within ±10 BPM of 200', Math.abs(fftBpm - 200) <= 10, `got ${fftBpm}`);
+}
+
+section('FFT signal-quality gate (no phantom BPM without a real pulse)');
+{
+    const app = loadApp(SCRIPT, 1300);
+    const N = app.CONSTANTS.FFT.BUFFER_SIZE;
+
+    app.FFTAnalyzer.reset();
+    for (let i = 0; i < N; i++) app.FFTAnalyzer.addSample(0, i * 33.3);
+    check('flat no-finger frame reports no BPM', app.FFTAnalyzer.computeBPM() === 0,
+        `got ${app.FFTAnalyzer.computeBPM()}`);
+
+    app.FFTAnalyzer.reset();
+    const rng = seededRandom(31);
+    for (let i = 0; i < N; i++) app.FFTAnalyzer.addSample((rng() - 0.5) * 0.02, i * 33.3);
+    check('pure sensor noise reports no BPM', app.FFTAnalyzer.computeBPM() === 0,
+        `got ${app.FFTAnalyzer.computeBPM()}`);
+}
+
+section('BPM window < 2 is clamped, not bricked');
+{
+    const app = loadApp(SCRIPT, 1400);
+    const samples = makePpg({ bpmAt: () => 75, fps: 30, durationS: 30, seed: 75 });
+    const res = runDetector(app, samples, 1); // pathological window from a stale setting
+    checkBpm('reads ~75 BPM even with window=1', tailMeanBpm(res, 10), 75, 0.06);
 }
 
 // ----------------------------------------------------------------------------
