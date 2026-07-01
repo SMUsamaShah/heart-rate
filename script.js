@@ -92,7 +92,7 @@ const CONSTANTS = {
 };
 
 // Must match CACHE_NAME in sw.js — used for the version display in Settings.
-const APP_CACHE = 'pulse-v11';
+const APP_CACHE = 'pulse-v12';
 
 const Config = {
     showPreview: true,
@@ -177,6 +177,11 @@ const ppgCtx = DOM.ppgCanvas.getContext('2d', { alpha: false });
 const previewCtx = DOM.previewCanvas.getContext('2d', { willReadFrequently: true });
 
 let animationFrameId = null;
+// Bumped whenever the running loop chain is cancelled. A loop invocation that
+// was suspended at an await (e.g. auto-stop's setMode) when the cancel
+// happened sees the mismatch on resume and does not re-arm, so a chain
+// restarted by visibilitychange can never end up doubled.
+let loopGeneration = 0;
 
 // ============================================================================
 // APP STATE
@@ -261,7 +266,7 @@ const Camera = {
             resolution: `${s.width}x${s.height}`,
             fps: s.frameRate ? s.frameRate.toFixed(1) : '--',
             exposure: s.exposureCompensation ?? s.exposureMode ?? '--',
-            iso: s.iso || '--'
+            iso: s.iso ?? '--'
         };
     },
     
@@ -697,6 +702,9 @@ const Renderer = {
         ppgCtx.textAlign = "center";
         ppgCtx.textBaseline = "bottom";
         ppgCtx.font = "9px monospace";
+        // The signal stroke below sets lineWidth = 2; reset it here so the
+        // grid and threshold lines don't inherit it on subsequent frames.
+        ppgCtx.lineWidth = 1;
 
         // Time marker grid lines (computed from time, not from data indices)
         ppgCtx.strokeStyle = 'rgba(255,255,255,0.15)';
@@ -715,7 +723,13 @@ const Renderer = {
         const thresholdPath = [];
         const beatMarkers = [];
 
-        for (let i = 0; i < end; i++) {
+        // Walk back from the newest visible sample instead of scanning from
+        // index 0, so scrubbing a long recording stays O(window) per frame
+        // rather than O(recording length).
+        let start = end - 1;
+        while (start > 0 && data[start - 1].time >= windowStart) start--;
+
+        for (let i = start; i < end; i++) {
             const d = data[i];
             const x = (d.time - windowStart) * pps;
             if (x < 0) continue;
@@ -903,9 +917,12 @@ const UI = {
     
     updateButtonsForMode(mode) {
         DOM.simulateBtn.innerText = mode === 'simulate' ? 'Stop' : 'Simulate';
-        // Only offer Save for an un-saved real capture; once auto-saved or saved
-        // the button hides so a stray tap can't persist a duplicate.
-        const canSave = mode === 'idle' && AppState.recording.length > 0 && !AppState.savedCurrent;
+        // Only offer Save for an un-saved real capture that is long enough to
+        // be saveable; once saved (or for a capture the save path would refuse)
+        // the button hides so a tap can't persist a duplicate or dead-end.
+        const canSave = mode === 'idle' && AppState.recording.length > 0 &&
+            !AppState.savedCurrent &&
+            AppState.totalTime >= CONSTANTS.STORAGE.MIN_SAVE_SECONDS;
         DOM.saveBtn.classList.toggle('hidden', !canSave);
     }
 };
@@ -913,19 +930,22 @@ const UI = {
 // ============================================================================
 // MODE MANAGEMENT
 // ============================================================================
-// Guards against re-entrant transitions: a tap that arrives while an async
-// transition (e.g. camera startup) is still in flight is ignored, so a
-// half-started camera stream can't be orphaned with its torch left on.
-let modeTransitioning = false;
-async function setMode(newMode) {
-    if (AppState.mode === newMode) return;
-    if (modeTransitioning) return;
-    modeTransitioning = true;
-    try {
+// Transitions are serialized on a promise chain: a request that arrives while
+// another transition is in flight (e.g. camera startup awaiting getUserMedia)
+// runs after it completes instead of being silently dropped. This keeps the
+// original guarantee (overlapping transitions can't orphan a half-started
+// camera stream with its torch on) while making `await setMode(...)` mean the
+// transition really happened — openReview and the visibilitychange teardown
+// rely on that.
+let modeTransition = Promise.resolve();
+function setMode(newMode) {
+    modeTransition = modeTransition.then(async () => {
+        // Check against the state at run time, not at request time: an
+        // earlier queued transition may already have landed on newMode.
+        if (AppState.mode === newMode) return;
         await applyMode(newMode);
-    } finally {
-        modeTransitioning = false;
-    }
+    }).catch(err => console.error('Mode transition failed', err));
+    return modeTransition;
 }
 
 async function applyMode(newMode) {
@@ -950,15 +970,20 @@ async function applyMode(newMode) {
     }
 
     AppState.mode = newMode;
-    
+
+    // Mode-owned overlays are cleared on every transition — not just into
+    // idle — so review controls or camera warnings can't leak into another
+    // mode (e.g. review -> simulate, camera -> review). Whatever the new mode
+    // needs is re-raised below (Camera.start re-shows the torch warning).
+    DOM.reviewControls.classList.remove('active');
+    DOM.saturationWarning.classList.add('hidden');
+    DOM.torchWarning.classList.add('hidden');
+
     if (newMode === 'idle') {
         DOM.instructionOverlay.classList.remove('hidden');
         DOM.modeBadge.classList.add('hidden');
-        DOM.reviewControls.classList.remove('active');
-        DOM.saturationWarning.classList.add('hidden');
-        DOM.torchWarning.classList.add('hidden');
         UI.updateBPMDisplay(0);
-        
+
     } else if (newMode === 'camera') {
         const started = await Camera.start();
         if (!started) {
@@ -1001,18 +1026,24 @@ async function applyMode(newMode) {
 // ============================================================================
 // ACTIONS
 // ============================================================================
-async function saveRecording() {
-    if (AppState.savedCurrent || AppState.recording.length === 0) return;
+// Guards a save already in flight: savedCurrent is only set after the async
+// quota check + write complete, so a double-tap on Save could otherwise pass
+// the savedCurrent check twice and persist duplicate records.
+let savePending = false;
+
+// `manual` distinguishes a user-initiated save (Save button) from the silent
+// auto-save path: manual saves always get feedback, auto-saves stay quiet.
+async function saveRecording(manual = false) {
+    if (savePending || AppState.savedCurrent || AppState.recording.length === 0) return;
 
     if (AppState.totalTime < CONSTANTS.STORAGE.MIN_SAVE_SECONDS) {
-        if (!Config.autoSave) {
-            alert("Too short to save (minimum 1 second)");
-        }
+        if (manual) alert("Too short to save (minimum 1 second)");
         return;
     }
 
-    if (!(await Storage.checkQuota())) return;
-
+    // Snapshot the record synchronously, before any await: a mode change
+    // during the quota check can clearHistory() and would otherwise be read
+    // back as an empty capture.
     // avgBpm is a true mean of the per-frame BPM across the whole capture (the
     // history list labels it "Avg BPM"), not just the final smoothed reading.
     const bpms = AppState.recording.map(h => h.bpm).filter(b => b > 0);
@@ -1028,38 +1059,46 @@ async function saveRecording() {
         samples: AppState.recording.map(h => ({ t: h.time, v: h.val }))
     };
 
-    if (!(await Storage.save(recording))) return;
-    AppState.savedCurrent = true;
-    UI.updateButtonsForMode(AppState.mode);
-    renderRecordingsList();
+    savePending = true;
+    try {
+        if (!(await Storage.checkQuota())) return;
 
-    if (!Config.autoSave) {
-        alert(`Saved! BPM: ${recording.avgBpm || 'N/A'}, Duration: ${AppState.totalTime.toFixed(1)}s`);
+        if (!(await Storage.save(recording))) return;
+        AppState.savedCurrent = true;
+        UI.updateButtonsForMode(AppState.mode);
+        renderRecordingsList();
+
+        if (manual) {
+            alert(`Saved! BPM: ${recording.avgBpm || 'N/A'}, Duration: ${recording.duration.toFixed(1)}s`);
+        }
+    } finally {
+        savePending = false;
     }
+}
+
+// Blob URLs are revoked on a delay: a synchronous revoke right after click()
+// can abort the download in some browsers.
+function downloadUrl(url, filename) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function exportGraphImage() {
     DOM.ppgCanvas.toBlob(blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `pulse-graph-${Date.now()}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
+        if (!blob) return alert("Could not export image");
+        downloadUrl(URL.createObjectURL(blob), `pulse-graph-${Date.now()}.png`);
     });
 }
 
 function exportAllData() {
     const url = Storage.exportAll();
     if (!url) return alert("No data to export");
-    
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `heart_rate_data_${Date.now()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadUrl(url, `heart_rate_data_${Date.now()}.json`);
 }
 
 function saveSettings() {
@@ -1156,6 +1195,7 @@ async function openReview(recording) {
     FFTAnalyzer.reset();
 
     const reviewData = [];
+    let lastBpm = 0;
 
     for (let i = 0; i < recording.samples.length; i++) {
         const sample = recording.samples[i];
@@ -1175,14 +1215,19 @@ async function openReview(recording) {
 
         const result = BeatDetector.process(processedSignal, timestampMs, Config.bpmCalculationWindow);
 
+        // Mirror the live displayBpm so review matches what was shown live,
+        // including FFT mode (otherwise review showed the threshold BPM).
+        // The last known reading is carried forward so the scrubber can label
+        // any position without re-scanning the recording every frame.
+        const displayBpm = fftBpm > 0 ? fftBpm : result.bpm;
+        if (displayBpm > 0) lastBpm = displayBpm;
+
         reviewData.push({
             time: sample.t,
             val: sample.v,
             threshold: result.threshold,
             beat: false,
-            // Mirror the live displayBpm so review matches what was shown live,
-            // including FFT mode (otherwise review showed the threshold BPM).
-            bpm: fftBpm > 0 ? fftBpm : result.bpm
+            bpm: lastBpm
         });
 
         // Same retroactive peak-marking as live mode: the beat fires on the
@@ -1193,7 +1238,6 @@ async function openReview(recording) {
     }
 
     AppState.reviewData = reviewData;
-    AppState.reviewData.duration = recording.duration;
 
     DOM.historySlider.min = 0;
     DOM.historySlider.max = recording.samples.length;
@@ -1201,17 +1245,14 @@ async function openReview(recording) {
     AppState.reviewOffset = recording.samples.length;
 
     // Display the BPM that was live at the end of the recording.
-    let finalBpm = recording.avgBpm;
-    for (let i = reviewData.length - 1; i >= 0; i--) {
-        if (reviewData[i].bpm > 0) { finalBpm = reviewData[i].bpm; break; }
-    }
-    UI.updateBPMDisplay(finalBpm);
+    UI.updateBPMDisplay(lastBpm > 0 ? lastBpm : recording.avgBpm);
 }
 
 // ============================================================================
 // ANIMATION LOOP
 // ============================================================================
 async function loop(timestamp) {
+    const generation = loopGeneration;
     if (!AppState.lastTime) AppState.lastTime = timestamp;
 
     // Clamp dt so a long rAF gap (tab switch, GC pause) cannot inject a huge
@@ -1274,17 +1315,17 @@ async function loop(timestamp) {
 
             // Read the running BPM stored at the current slider position.
             // These values were computed by the exact same BeatDetector.process()
-            // algorithm used during live recording, so review and live are identical.
-            for (let i = end - 1; i >= 0; i--) {
-                if (data[i].bpm > 0) {
-                    UI.updateBPMDisplay(data[i].bpm);
-                    break;
-                }
+            // algorithm used during live recording (with the last known reading
+            // carried forward by openReview), so review and live are identical.
+            if (data[end - 1].bpm > 0) {
+                UI.updateBPMDisplay(data[end - 1].bpm);
             }
         }
     }
     
-    animationFrameId = requestAnimationFrame(loop);
+    if (generation === loopGeneration) {
+        animationFrameId = requestAnimationFrame(loop);
+    }
 }
 
 // ============================================================================
@@ -1300,7 +1341,7 @@ DOM.bpmSlider.oninput = e => {
 };
 
 DOM.simulateBtn.onclick = () => setMode(AppState.mode === 'simulate' ? 'idle' : 'simulate');
-DOM.saveBtn.onclick = saveRecording;
+DOM.saveBtn.onclick = () => saveRecording(true);
 DOM.backToLiveBtn.onclick = () => setMode('idle');
 DOM.exportImgBtn.onclick = exportGraphImage;
 DOM.exportJsonBtn.onclick = exportAllData;
@@ -1334,6 +1375,7 @@ DOM.settingMaxRecords.oninput = saveSettings;
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+        loopGeneration++;
         cancelAnimationFrame(animationFrameId);
         animationFrameId = null;
         // Route camera teardown through setMode so an in-progress recording is
@@ -1346,8 +1388,9 @@ document.addEventListener('visibilitychange', () => {
     } else if (!animationFrameId) {
         // Only start a loop if one isn't already queued: a frame queued before
         // the tab was hidden is merely paused, and starting a second here would
-        // run two loops at once.
-        loop(performance.now());
+        // run two loops at once. Scheduling via rAF (rather than calling loop
+        // directly) sets animationFrameId synchronously, closing that window.
+        animationFrameId = requestAnimationFrame(loop);
     }
 });
 
@@ -1372,23 +1415,27 @@ resizeCanvas();
 // CANVAS TAP TO RECORD
 // ============================================================================
 function handleCanvasTap() {
-    const mode = AppState.mode;
-    if (mode === 'review') return;
-    if (mode === 'idle') {
+    if (AppState.mode === 'idle') {
         setMode('camera');
-    } else if (mode === 'camera' || mode === 'simulate') {
+    } else {
+        // camera, simulate and review all stop back to idle
         setMode('idle');
     }
 }
 
+// Interactive children of the canvas area (buttons, the review scrubber, the
+// install banner) must not double as a canvas tap — e.g. scrubbing the review
+// timeline or dismissing the install banner must not toggle recording.
+const CANVAS_TAP_IGNORE = 'button, input, #reviewControls, #installBanner';
+
 document.getElementById('canvasContainer').addEventListener('touchstart', e => {
-    if (e.target.closest('button')) return;
+    if (e.target.closest(CANVAS_TAP_IGNORE)) return;
     e.preventDefault();
     handleCanvasTap();
 }, { passive: false });
 
 document.getElementById('canvasContainer').addEventListener('click', e => {
-    if (e.target.closest('button')) return;
+    if (e.target.closest(CANVAS_TAP_IGNORE)) return;
     handleCanvasTap();
 });
 
