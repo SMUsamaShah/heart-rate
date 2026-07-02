@@ -138,3 +138,157 @@ and the history of commit `f457343`. Regression tests were added to
 `test/run-tests.js` for finding 2 (recording buffer retains the full capture),
 the FFT signal-quality gate (flat/noise report no BPM), and the BPM-window clamp;
 the suite is green at 50 checks.
+
+---
+---
+
+# Second-pass analysis — 2026-07-01
+
+Baseline: all 50 regression tests pass; the signal-processing and beat-detection
+core is sound. The first-pass fixes hold. The defects below are what remains,
+again concentrated in the mode state machine and the save path. Findings 1–4
+were each verified empirically by driving the unmodified `script.js` through
+`test/harness.js` (13/13 repro checks confirmed); the low-severity items are
+confirmed by code trace.
+
+Status: **all items below are fixed** in the accompanying commit, except the
+two perf observations explicitly marked as accepted behavior.
+
+## Medium severity
+
+### 1. `setMode` silently drops transitions requested during a transition; `openReview` assumes its transition happened — Fixed
+The `modeTransitioning` guard (first-pass fix for the stream-leak bug) makes an
+overlapping `setMode` call a *silent no-op* — it returns immediately without
+transitioning and without signalling the caller. Two callers assume the
+transition happened:
+
+- **`openReview`** does `await setMode('review')` with a comment saying the
+  await exists "so an in-flight camera auto-save reads the live
+  BeatDetector.bpm before the replay resets the detector" — but when a
+  transition *is* in flight (exactly the case the comment worries about), the
+  await resolves instantly against the dropped call. `openReview` then runs
+  anyway: it resets the live `BeatDetector` and repopulates it with the
+  replayed recording's state (beat timestamps in the replay's 0-based clock
+  domain, not the live `performance.now()` domain), installs `reviewData`,
+  reprograms the history slider, and overwrites the BPM readout — while
+  `AppState.mode` is still `camera` and the review UI never appears. Verified:
+  tapping a saved recording while `getUserMedia` is pending (the permission
+  prompt can be open for seconds) leaves `mode: 'camera'`, badge `CAMERA`,
+  `reviewData` installed, review controls never shown, detector state replaced.
+  The same window exists while *leaving* camera mode (the auto-save's
+  `checkQuota`/`setItem` awaits), where the replay-corrupted detector keeps
+  feeding the still-live camera loop.
+- **The `visibilitychange` teardown** (`if (mode === 'camera') setMode('idle')`)
+  is likewise dropped if the tab is hidden while the camera transition is still
+  in flight — the documented guarantee that hiding the tab auto-saves and
+  releases the camera/torch does not hold in that window.
+
+**Fix:** transitions are now serialized on a promise chain — a `setMode` call
+that arrives mid-transition runs after the in-flight one completes instead of
+being dropped (the target-mode equality check moves inside the queued step, so
+a request that has become redundant is still a no-op). The original guarantee
+(overlapping transitions can't orphan a half-started stream) is preserved, and
+`await setMode(...)` now means the transition really happened. A side effect is
+that a stop-tap during camera startup now stops the camera once startup
+completes, honoring the user's intent instead of ignoring it.
+
+### 2. Double-tap on Save persists duplicate records — Fixed
+`saveRecording` sets `AppState.savedCurrent = true` only *after* awaiting
+`Storage.checkQuota()` (a real async API — `navigator.storage.estimate()`) and
+`Storage.save()`. A second tap landing in that window passes the
+`savedCurrent` guard and saves again; the taps get different `Date.now()` ids,
+so `Storage.save`'s replace-by-id path doesn't dedupe them. Verified: two
+overlapping `saveRecording()` calls persist 2 records from one capture. The
+first-pass `savedCurrent` fix (finding 5) covered the *sequential* duplicate,
+not the concurrent one.
+**Fix:** a synchronous `savePending` guard at the top of `saveRecording` makes
+the overlapping call a no-op. The record (samples, duration, avgBpm) is also
+now snapshotted *before* the first await, so a mode change that runs
+`clearHistory()` during the quota check can no longer be read back as an
+empty capture.
+
+### 3. Mode-entry cleanup only happens in the `idle` branch — stale overlays leak across modes — Fixed
+`applyMode` hides `reviewControls`, `saturationWarning` and `torchWarning` only
+when entering `idle`. Transitions that skip `idle` keep another mode's UI on
+screen:
+
+- **review → simulate** (the Simulate button in Settings is reachable while
+  reviewing): the review overlay — timeline scrubber, **Done**, **Save Graph
+  Img** — stays overlaid on the live simulation graph, and the scrubber keeps
+  writing `AppState.reviewOffset`. Verified.
+- **camera → review** and **camera → simulate**: the torch/saturation warning
+  banners stay overlaid on the review/simulation view. Verified for the torch
+  warning into review; the saturation warning and the simulate destination
+  follow the identical code path.
+
+**Fix:** the overlay/warning cleanup is hoisted out of the `idle` branch and
+runs on every transition; whatever the new mode needs is re-raised afterwards
+(the review branch re-activates its controls, `Camera.start` re-shows the
+torch warning).
+
+## Low severity
+
+### 4. Too-short capture with Auto-Save on leaves a dead, silent Save button — Fixed
+A capture under `MIN_SAVE_SECONDS` is skipped by auto-save, so `savedCurrent`
+stays false and the Save button is shown in idle. Tapping it hits the same
+too-short early return, whose alert is gated on `!Config.autoSave` — so with
+Auto-Save on the tap does nothing and says nothing. Verified: button visible,
+0 records, 0 alerts.
+**Fix:** both suggestions applied — the Save button now hides for captures
+below `MIN_SAVE_SECONDS`, and `saveRecording` takes a `manual` flag (set by the
+Save button) so a user-initiated save always gets feedback while the auto-save
+path stays silent.
+
+### 5. Code/doc mismatch: tapping the canvas does not exit review — Fixed
+`handleCanvasTap` returned early for `review`, so only **Done** exited — but
+the mode diagram in CLAUDE.md documents "review → idle (tap canvas or Done)".
+**Fix:** the code now matches the docs — a canvas tap in review exits to idle.
+The tap-ignore guard was widened from `button` to
+`button, input, #reviewControls, #installBanner`, which also fixes two latent
+relatives of first-pass finding 1: dragging the review timeline scrubber (an
+`input`, not a `button`) and tapping the install banner's text area no longer
+bubble into `handleCanvasTap` (the latter used to start the camera).
+
+### 6. Cosmetics / robustness (code trace) — Fixed except where noted
+- **Renderer `lineWidth` leak:** the signal stroke sets `lineWidth = 2` and
+  never resets it, so the grid and threshold lines render at 1px on the first
+  frame and 2px on every later frame. **Fix:** reset to 1 at the top of
+  `drawSignal`.
+- **`Camera.getStats` hides ISO 0:** `s.iso || '--'` — same falsy-zero bug the
+  first pass fixed for `exposureCompensation`. **Fix:** `??`.
+- **`exportGraphImage`:** revoked the object URL synchronously after
+  `a.click()` (can abort the download in some browsers), didn't handle
+  `toBlob` yielding `null`, and unlike `exportAllData` never appended the
+  anchor to the DOM. **Fix:** both exports share a `downloadUrl` helper that
+  appends the anchor and revokes on a delay; the `null`-blob case alerts.
+- **Dead code:** `AppState.reviewData.duration` was assigned in `openReview`
+  but never read. **Fix:** removed.
+- **Quadratic work on long recordings:** **Fixed** the per-frame costs —
+  `drawSignal` now walks back from the newest visible sample (O(window) per
+  frame instead of O(recording)), and `openReview` carries the last known BPM
+  forward into each replay point so the scrubber label is a direct read
+  instead of a backward scan. **Accepted as-is:** `AppState.recording` growing
+  without limit (any cap would silently truncate saves — the exact bug fixed
+  in first-pass finding 2) and the FFT replay running one `computeBPM` per
+  sample (it mirrors the live path exactly and stays fast at realistic
+  recording lengths).
+- **Theoretical double-loop window:** if the tab was hidden and re-shown while
+  `loop` was suspended at `await setMode('idle')` (auto-stop), the visibility
+  handler could start a second rAF chain before the suspended one re-armed.
+  **Fix:** a `loopGeneration` token, bumped on cancel, stops a stale suspended
+  invocation from re-arming; the visible branch schedules via
+  `requestAnimationFrame` so `animationFrameId` is set synchronously.
+
+## Verification
+
+Findings 1–4 were reproduced against the unmodified `script.js` in the
+`test/harness.js` Node vm sandbox (fake `getUserMedia`/`navigator.storage` where
+needed): 13/13 repro assertions confirmed. The existing 50-check regression
+suite was green at that baseline.
+
+With the fixes applied, 7 regression checks were added to `test/run-tests.js`
+(queued transitions, overlay cleanup on review→simulate and camera→review,
+concurrent-save dedupe, and the too-short-capture Save button): all 7 fail
+against the pre-fix `script.js` and the full suite is green at 57 checks on the
+fixed one. `CACHE_NAME`/`APP_CACHE` were bumped to `pulse-v12` so installed
+PWAs pick up the fixes.

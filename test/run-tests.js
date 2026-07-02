@@ -12,6 +12,7 @@
 'use strict';
 
 const path = require('path');
+const vm = require('vm');
 const { loadApp, seededRandom } = require('./harness');
 
 const SCRIPT = process.argv[2] || path.join(__dirname, '..', 'script.js');
@@ -355,5 +356,121 @@ section('BPM window < 2 is clamped, not bricked');
 }
 
 // ----------------------------------------------------------------------------
-console.log(`\n${passed + failed} checks: ${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+// Mode/state-machine regressions — driven through the real setMode /
+// openReview / saveRecording globals inside the sandbox, with getUserMedia
+// and navigator.storage faked where the scenario needs them.
+// ----------------------------------------------------------------------------
+function fakeCameraStream() {
+    const track = {
+        getCapabilities: () => ({}), // no torch support
+        getSettings: () => ({ width: 320, height: 240, frameRate: 30 }),
+        applyConstraints: async () => {},
+        stop: () => {}
+    };
+    return { getVideoTracks: () => [track], getTracks: () => [track] };
+}
+
+// A minimal valid stored recording: 5s of a pulse-like waveform at ~75 BPM.
+function makeStoredRecording(app, id = 1) {
+    const samples = [];
+    for (let t = 0; t < 5; t += 1 / 30) {
+        const ph = (t % 0.8) / 0.8;
+        samples.push({ t, v: 0.5 * Math.exp(-((ph - 0.2) ** 2) / (2 * 0.08 ** 2)) });
+    }
+    return { id, v: app.CONSTANTS.VERSION, timestamp: new Date().toISOString(),
+             duration: 5, avgBpm: 75, samples };
+}
+
+const domEl = (app, id) => app.context.document.getElementById(id);
+
+(async () => {
+    section('Transitions requested mid-transition are queued, not dropped');
+    try {
+        const app = loadApp(SCRIPT, 2000);
+        const ctx = app.context;
+        let resolveGUM;
+        ctx.navigator.mediaDevices = {
+            getUserMedia: () => new Promise(r => { resolveGUM = r; })
+        };
+        const camP = ctx.setMode('camera');                      // suspends in getUserMedia
+        const revP = ctx.openReview(makeStoredRecording(app));   // arrives mid-transition
+        // Let the (possibly queued) camera transition reach getUserMedia,
+        // then answer the "permission prompt".
+        for (let i = 0; !resolveGUM && i < 100; i++) await new Promise(r => setImmediate(r));
+        resolveGUM(fakeCameraStream());
+        await camP;
+        await revP;
+        check('openReview during camera startup still reaches review mode',
+            app.AppState.mode === 'review', `mode=${app.AppState.mode}`);
+        check('review UI is shown',
+            domEl(app, 'reviewControls').classList.contains('active'));
+    } catch (e) {
+        check('openReview during camera startup still reaches review mode', false, e.message);
+    }
+
+    section('Mode-owned overlays are cleared on every transition');
+    try {
+        const app = loadApp(SCRIPT, 2100);
+        await app.context.openReview(makeStoredRecording(app));
+        await app.context.setMode('simulate'); // Simulate button is reachable from review
+        check('review -> simulate hides the review controls',
+            app.AppState.mode === 'simulate' &&
+            !domEl(app, 'reviewControls').classList.contains('active'));
+    } catch (e) {
+        check('review -> simulate hides the review controls', false, e.message);
+    }
+    try {
+        const app = loadApp(SCRIPT, 2200);
+        const ctx = app.context;
+        ctx.navigator.mediaDevices = { getUserMedia: async () => fakeCameraStream() };
+        await ctx.setMode('camera'); // torchless stream raises the torch warning
+        const shownDuringCamera = !domEl(app, 'torchWarning').classList.contains('hidden');
+        await ctx.openReview(makeStoredRecording(app));
+        check('camera -> review hides the torch warning',
+            shownDuringCamera && domEl(app, 'torchWarning').classList.contains('hidden'),
+            shownDuringCamera ? 'warning leaked into review' : 'warning never shown in camera');
+    } catch (e) {
+        check('camera -> review hides the torch warning', false, e.message);
+    }
+
+    section('Concurrent Save taps persist a single record');
+    try {
+        const app = loadApp(SCRIPT, 2300);
+        const ctx = app.context;
+        // navigator.storage.estimate() is genuinely async in browsers — that
+        // gap is what let a second tap through before savedCurrent was set.
+        ctx.navigator.storage = { estimate: async () => ({ usage: 0, quota: 1e9 }) };
+        // Make sure two saves would get distinct record ids.
+        vm.runInContext('(() => { let t = 1e12; Date.now = () => (t += 137); })()', ctx);
+        app.AppState.totalTime = 5;
+        for (let t = 0; t < 5; t += 1 / 30) app.AppState.addHistoryPoint(t, 0.3, 0.1, false, 75);
+        await Promise.all([ctx.saveRecording(true), ctx.saveRecording(true)]);
+        const records = JSON.parse(ctx.localStorage.getItem(app.CONSTANTS.STORAGE.KEY) || '[]');
+        check('double-tap on Save stores one record', records.length === 1,
+            `stored ${records.length}`);
+    } catch (e) {
+        check('double-tap on Save stores one record', false, e.message);
+    }
+
+    section('Too-short capture cannot leave a dead Save button');
+    try {
+        const app = loadApp(SCRIPT, 2400);
+        const ctx = app.context;
+        let alerts = 0;
+        ctx.alert = () => { alerts++; };
+        app.Config.autoSave = true;
+        app.AppState.totalTime = 0.5; // < MIN_SAVE_SECONDS
+        app.AppState.addHistoryPoint(0.1, 0.3, 0.1, false, 75);
+        vm.runInContext('UI.updateButtonsForMode("idle")', ctx);
+        check('Save button hidden for a sub-minimum capture',
+            domEl(app, 'saveBtn').classList.contains('hidden'));
+        await ctx.saveRecording(true);
+        check('a manual save attempt still gets feedback', alerts === 1, `${alerts} alerts`);
+    } catch (e) {
+        check('Save button hidden for a sub-minimum capture', false, e.message);
+    }
+
+    // ------------------------------------------------------------------------
+    console.log(`\n${passed + failed} checks: ${passed} passed, ${failed} failed`);
+    process.exit(failed ? 1 : 0);
+})();

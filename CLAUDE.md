@@ -190,6 +190,7 @@ The suite loads the **real, unmodified `script.js`** into a Node `vm` sandbox (`
 - Demo-mode pipeline: simulated signal at the slider BPM must read back within tolerance
 - Simulation realism: noise present, reproducible by seed, HRV jitter in range
 - FFT mode estimate at 200 BPM
+- Mode/state-machine regressions (driven through the real `setMode`/`openReview`/`saveRecording` with faked `getUserMedia`): transitions requested mid-transition are queued rather than dropped, mode-owned overlays are cleared on every transition, concurrent Save taps store a single record, Save button hidden for un-saveable captures
 
 When changing detector or simulation constants, add/adjust a scenario rather than hand-tuning blind.
 
